@@ -3,3 +3,4 @@ db_path = "../wakey.sqlite"
 release = false
 admin_id = 0
 max_jobs = 100
+max_state_age = 120

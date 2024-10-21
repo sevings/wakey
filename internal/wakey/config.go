@@ -9,11 +9,12 @@ import (
 )
 
 type Config struct {
-	TgToken string `koanf:"tg_token"`
-	DBPath  string `koanf:"db_path"`
-	Release bool
-	AdminID int64 `koanf:"admin_id"`
-	MaxJobs int   `koand:"max_jobs"`
+	TgToken     string `koanf:"tg_token"`
+	DBPath      string `koanf:"db_path"`
+	Release     bool
+	AdminID     int64 `koanf:"admin_id"`
+	MaxJobs     int   `koand:"max_jobs"`
+	MaxStateAge int   `koanf:"max_state_age"`
 }
 
 func LoadConfig() (Config, error) {

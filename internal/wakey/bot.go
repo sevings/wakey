@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -14,14 +13,13 @@ import (
 )
 
 type Bot struct {
-	api        BotAPI
-	db         *DB
-	wishSched  Scheduler
-	planSched  Scheduler
-	userStates map[int64]*UserData
-	stateMutex sync.Mutex
-	adm        int64
-	log        *zap.SugaredLogger
+	api          BotAPI
+	db           *DB
+	wishSched    Scheduler
+	planSched    Scheduler
+	stateManager *StateManager
+	adm          int64
+	log          *zap.SugaredLogger
 }
 
 type BotAPI interface {
@@ -40,25 +38,6 @@ type Scheduler interface {
 	Schedule(at time.Time, id JobID)
 	Cancel(id JobID)
 }
-
-type UserState int
-
-const (
-	StateNone UserState = iota
-	StateAwaitingName
-	StateAwaitingBio
-	StateAwaitingTime
-	StateAwaitingPlans
-	StateAwaitingWakeTime
-	StateAwaitingWish
-	StateAwaitingNotificationTime
-	StateUpdatingName
-	StateUpdatingBio
-	StateUpdatingTimezone
-	StateUpdatingPlans
-	StateUpdatingWakeTime
-	StateUpdatingNotificationTime
-)
 
 const (
 	btnWishLike         = "wish_like"
@@ -80,24 +59,13 @@ const (
 	btnSkipBan          = "skip_ban"
 )
 
-type UserData struct {
-	State          UserState
-	IsSingleAction bool
-	Name           string
-	Bio            string
-	Plans          string
-	TargetUserID   int64
-	TargetPlanID   uint
-}
-
-func NewBot(cfg Config, db *DB, wishSched, planSched Scheduler) (*Bot, bool) {
+func NewBot(db *DB, wishSched, planSched Scheduler) (*Bot, bool) {
 	bot := &Bot{
-		db:         db,
-		wishSched:  wishSched,
-		planSched:  planSched,
-		userStates: make(map[int64]*UserData),
-		adm:        cfg.AdminID,
-		log:        zap.L().Named("bot").Sugar(),
+		db:           db,
+		wishSched:    wishSched,
+		planSched:    planSched,
+		stateManager: NewStateManager(),
+		log:          zap.L().Named("bot").Sugar(),
 	}
 
 	bot.wishSched.SetJobFunc(bot.SendWish)
@@ -106,7 +74,8 @@ func NewBot(cfg Config, db *DB, wishSched, planSched Scheduler) (*Bot, bool) {
 	return bot, true
 }
 
-func (bot *Bot) Start(api BotAPI) {
+func (bot *Bot) Start(cfg Config, api BotAPI) {
+	bot.adm = cfg.AdminID
 	bot.api = api
 
 	bot.api.Use(middleware.Recover())
@@ -121,6 +90,11 @@ func (bot *Bot) Start(api BotAPI) {
 	// Load and schedule future wishes
 	bot.scheduleFutureWishes()
 
+	// Start the state manager cleanup routine
+	cleanupInterval := time.Duration(cfg.MaxStateAge) / 10 * time.Hour
+	maxStateAge := time.Duration(cfg.MaxStateAge) * time.Hour
+	bot.stateManager.Start(cleanupInterval, maxStateAge)
+
 	go func() {
 		bot.log.Info("starting bot")
 		bot.api.Start()
@@ -129,6 +103,7 @@ func (bot *Bot) Start(api BotAPI) {
 }
 
 func (bot *Bot) Stop() {
+	bot.stateManager.Stop()
 	bot.api.Stop()
 }
 
@@ -250,30 +225,27 @@ func (bot *Bot) handleActionCallback(c tele.Context) error {
 	action := c.Data()
 	userID := c.Sender().ID
 
-	bot.stateMutex.Lock()
-	defer bot.stateMutex.Unlock()
-
 	switch action {
 	case btnChangeName:
-		bot.userStates[userID] = &UserData{State: StateUpdatingName}
+		bot.stateManager.SetState(userID, StateUpdatingName)
 		return c.Edit("Пожалуйста, введите ваше новое имя.")
 	case btnChangeBio:
-		bot.userStates[userID] = &UserData{State: StateUpdatingBio}
+		bot.stateManager.SetState(userID, StateUpdatingBio)
 		return c.Edit("Пожалуйста, введите ваше новое био.")
 	case btnChangeTimezone:
-		bot.userStates[userID] = &UserData{State: StateUpdatingTimezone}
+		bot.stateManager.SetState(userID, StateUpdatingTimezone)
 		return c.Edit("Пожалуйста, введите текущее время в формате ЧЧ:ММ.")
 	case btnChangePlans:
-		bot.userStates[userID] = &UserData{State: StateUpdatingPlans}
+		bot.stateManager.SetState(userID, StateUpdatingPlans)
 		return c.Edit("Пожалуйста, введите ваши новые планы на завтра.")
 	case btnChangeWakeTime:
-		bot.userStates[userID] = &UserData{State: StateUpdatingWakeTime}
+		bot.stateManager.SetState(userID, StateUpdatingWakeTime)
 		return c.Edit("Пожалуйста, введите новое время пробуждения в формате ЧЧ:ММ.")
 	case btnChangeNotifyTime:
-		bot.userStates[userID] = &UserData{State: StateUpdatingNotificationTime}
+		bot.stateManager.SetState(userID, StateUpdatingNotificationTime)
 		return c.Edit("Пожалуйста, введите новое время уведомления в формате ЧЧ:ММ.")
 	case btnDoNothing:
-		delete(bot.userStates, userID)
+		bot.stateManager.ClearState(userID)
 		return c.Edit("Хорошо, до свидания! Если вам что-то понадобится, просто напишите мне.")
 	default:
 		return c.Edit("Неизвестный выбор. Пожалуйста, попробуйте еще раз.")
@@ -343,11 +315,8 @@ func (bot *Bot) handleStart(c tele.Context) error {
 		return c.Send(fullMessage)
 	}
 
-	bot.stateMutex.Lock()
-	defer bot.stateMutex.Unlock()
-
 	// Start registration process
-	bot.userStates[userID] = &UserData{State: StateAwaitingName}
+	bot.stateManager.SetState(userID, StateAwaitingName)
 	welcomeMessage := "Добро пожаловать! Давайте зарегистрируем вас. Но сначала, позвольте рассказать о моих возможностях.\n\n"
 	welcomeMessage += bot.getWelcomeMessage()
 	welcomeMessage += "\n\nТеперь давайте начнем регистрацию. Как вас зовут?"
@@ -378,7 +347,8 @@ func (bot *Bot) handleSetPlans(c tele.Context) error {
 		return c.Send("Извините, вы не можете использовать бота, так как были забанены.")
 	}
 
-	return bot.handlePlansAndWakeTime(c)
+	bot.stateManager.SetState(userID, StateAwaitingPlans)
+	return c.Send("Пожалуйста, расскажите о ваших планах на завтра.")
 }
 
 func (bot *Bot) handleText(c tele.Context) error {
@@ -390,27 +360,24 @@ func (bot *Bot) handleText(c tele.Context) error {
 		return c.Send("Извините, вы не можете использовать бота, так как были забанены.")
 	}
 
-	bot.stateMutex.Lock()
-	defer bot.stateMutex.Unlock()
-
-	state, exists := bot.userStates[userID]
+	state, exists := bot.stateManager.GetState(userID)
 	if !exists {
 		return bot.suggestActions(c)
 	}
 
-	switch state.State {
+	switch state {
 	case StateAwaitingName:
-		return bot.handleNameInput(c, state)
+		return bot.handleNameInput(c)
 	case StateAwaitingBio:
-		return bot.handleBioInput(c, state)
+		return bot.handleBioInput(c)
 	case StateAwaitingTime:
-		return bot.handleTimeInput(c, state)
+		return bot.handleTimeInput(c)
 	case StateAwaitingPlans:
-		return bot.handlePlansInput(c, state)
+		return bot.handlePlansInput(c)
 	case StateAwaitingWakeTime:
-		return bot.handleWakeTimeInput(c, state)
+		return bot.handleWakeTimeInput(c)
 	case StateAwaitingWish:
-		return bot.handleWishInput(c, state)
+		return bot.handleWishInput(c)
 	case StateAwaitingNotificationTime:
 		return bot.handleNotificationTimeInput(c)
 	case StateUpdatingName:
@@ -451,19 +418,26 @@ func (bot *Bot) suggestActions(c tele.Context) error {
 	return c.Send("Похоже, вы не выполняете никаких действий. Что бы вы хотели сделать?", inlineKeyboard)
 }
 
-func (bot *Bot) handleNameInput(c tele.Context, state *UserData) error {
-	state.Name = c.Text()
-	state.State = StateAwaitingBio
-	return c.Send("Приятно познакомиться, " + state.Name + "! Теперь, пожалуйста, расскажите немного о себе (краткое био).")
+func (bot *Bot) handleNameInput(c tele.Context) error {
+	userID := c.Sender().ID
+	userData, _ := bot.stateManager.GetUserData(userID)
+	userData.Name = c.Text()
+	bot.stateManager.SetUserData(userID, userData)
+	bot.stateManager.SetState(userID, StateAwaitingBio)
+	return c.Send("Приятно познакомиться, " + userData.Name + "! Теперь, пожалуйста, расскажите немного о себе (краткое био).")
 }
 
-func (bot *Bot) handleBioInput(c tele.Context, state *UserData) error {
-	state.Bio = c.Text()
-	state.State = StateAwaitingTime
+func (bot *Bot) handleBioInput(c tele.Context) error {
+	userID := c.Sender().ID
+	userData, _ := bot.stateManager.GetUserData(userID)
+	userData.Bio = c.Text()
+	bot.stateManager.SetUserData(userID, userData)
+	bot.stateManager.SetState(userID, StateAwaitingTime)
 	return c.Send("Отлично! Наконец, скажите, который сейчас у вас час? (Пожалуйста, используйте формат ЧЧ:ММ)")
 }
 
-func (bot *Bot) handleTimeInput(c tele.Context, state *UserData) error {
+func (bot *Bot) handleTimeInput(c tele.Context) error {
+	userID := c.Sender().ID
 	timeStr := c.Text()
 
 	// Parse the time
@@ -477,11 +451,13 @@ func (bot *Bot) handleTimeInput(c tele.Context, state *UserData) error {
 	userTime := time.Date(now.Year(), now.Month(), now.Day(), t.Hour(), t.Minute(), 0, 0, time.UTC)
 	tzOffset := int32(userTime.Sub(now).Minutes())
 
+	userData, _ := bot.stateManager.GetUserData(userID)
+
 	// Save user to database
 	user := User{
-		ID:   c.Sender().ID,
-		Name: state.Name,
-		Bio:  state.Bio,
+		ID:   userID,
+		Name: userData.Name,
+		Bio:  userData.Bio,
 		Tz:   tzOffset,
 	}
 	if err := bot.db.SaveUser(&user); err != nil {
@@ -490,43 +466,25 @@ func (bot *Bot) handleTimeInput(c tele.Context, state *UserData) error {
 	}
 
 	// Registration complete
-	state.State = StateAwaitingPlans
+	bot.stateManager.SetState(userID, StateAwaitingPlans)
 	return c.Send("Отлично! Теперь расскажите о ваших планах на завтра.")
 }
 
-func (bot *Bot) handlePlansAndWakeTime(c tele.Context) error {
+func (bot *Bot) handlePlansInput(c tele.Context) error {
 	userID := c.Sender().ID
-
-	bot.stateMutex.Lock()
-	defer bot.stateMutex.Unlock()
-
-	state, exists := bot.userStates[userID]
-	if !exists {
-		state = &UserData{State: StateAwaitingPlans}
-		bot.userStates[userID] = state
-	}
-
-	switch state.State {
-	case StateAwaitingPlans:
-		return bot.handlePlansInput(c, state)
-	case StateAwaitingWakeTime:
-		return bot.handleWakeTimeInput(c, state)
-	default:
-		return c.Send("Что-то пошло не так. Пожалуйста, попробуйте еще раз.")
-	}
-}
-
-func (bot *Bot) handlePlansInput(c tele.Context, state *UserData) error {
-	state.Plans = c.Text()
-	state.State = StateAwaitingWakeTime
+	userData, _ := bot.stateManager.GetUserData(userID)
+	userData.Plans = c.Text()
+	bot.stateManager.SetUserData(userID, userData)
+	bot.stateManager.SetState(userID, StateAwaitingWakeTime)
 	return c.Send("Отлично! Теперь скажите, во сколько вы планируете проснуться завтра? (Используйте формат ЧЧ:ММ)")
 }
 
-func (bot *Bot) handleWakeTimeInput(c tele.Context, state *UserData) error {
+func (bot *Bot) handleWakeTimeInput(c tele.Context) error {
+	userID := c.Sender().ID
 	wakeTimeStr := c.Text()
 
 	// Load user to get timezone
-	user, err := bot.db.GetUser(c.Sender().ID)
+	user, err := bot.db.GetUser(userID)
 	if err != nil {
 		bot.log.Errorw("failed to load user", "error", err)
 		return c.Send("Извините, произошла ошибка. Пожалуйста, попробуйте позже.")
@@ -548,10 +506,12 @@ func (bot *Bot) handleWakeTimeInput(c tele.Context, state *UserData) error {
 	// Convert local wake time to UTC
 	utcWakeTime := localWakeTime.UTC()
 
+	userData, _ := bot.stateManager.GetUserData(userID)
+
 	// Save plan to database
 	plan := &Plan{
-		UserID:  c.Sender().ID,
-		Content: state.Plans,
+		UserID:  userID,
+		Content: userData.Plans,
 		WakeAt:  utcWakeTime,
 	}
 
@@ -560,7 +520,7 @@ func (bot *Bot) handleWakeTimeInput(c tele.Context, state *UserData) error {
 		return c.Send("Извините, произошла ошибка при сохранении вашей информации. Пожалуйста, попробуйте позже.")
 	}
 
-	delete(bot.userStates, c.Sender().ID)
+	bot.stateManager.ClearState(userID)
 
 	err = c.Send("Спасибо! Ваши планы и время пробуждения сохранены.")
 	if err != nil {
@@ -666,11 +626,14 @@ func (bot *Bot) findUserForWish(c tele.Context) error {
 
 	userInfo := fmt.Sprintf("Имя: %s\nО себе: %s\nПланы: %s",
 		plan.User.Name, plan.User.Bio, plan.Content)
-	bot.userStates[c.Sender().ID] = &UserData{
+
+	// Set user state and data
+	userData := &UserData{
 		State:        StateAwaitingWish,
 		TargetUserID: plan.User.ID,
 		TargetPlanID: plan.ID,
 	}
+	bot.stateManager.SetUserData(senderID, userData)
 
 	return c.Send(fmt.Sprintf("Отправьте ваше пожелание для этого пользователя:\n\n%s", userInfo))
 }
@@ -710,21 +673,27 @@ func (bot *Bot) handleShowPlan(c tele.Context) error {
 	return c.Send(message)
 }
 
-func (bot *Bot) handleWishInput(c tele.Context, state *UserData) error {
-	plan, err := bot.db.GetPlanByID(state.TargetPlanID)
+func (bot *Bot) handleWishInput(c tele.Context) error {
+	userID := c.Sender().ID
+	userData, _ := bot.stateManager.GetUserData(userID)
+	if userData == nil {
+		return c.Send("Извините, произошла ошибка. Пожалуйста, начните процесс заново.")
+	}
+
+	plan, err := bot.db.GetPlanByID(userData.TargetPlanID)
 	if err != nil {
 		bot.log.Errorw("failed to get plan", "error", err)
 		return c.Send("Извините, произошла ошибка. Пожалуйста, попробуйте позже.")
 	}
 
 	if time.Now().UTC().Sub(plan.OfferedAt) > time.Hour {
-		delete(bot.userStates, c.Sender().ID)
+		bot.stateManager.ClearState(userID)
 		return c.Send("Извините, время для отправки пожелания истекло. Пожалуйста, попробуйте отправить новое пожелание.")
 	}
 
 	wish := &Wish{
-		FromID:  c.Sender().ID,
-		PlanID:  state.TargetPlanID,
+		FromID:  userID,
+		PlanID:  userData.TargetPlanID,
 		Content: c.Text(),
 	}
 
@@ -735,7 +704,7 @@ func (bot *Bot) handleWishInput(c tele.Context, state *UserData) error {
 
 	bot.wishSched.Schedule(plan.WakeAt, JobID(wish.ID))
 
-	delete(bot.userStates, c.Sender().ID)
+	bot.stateManager.ClearState(userID)
 	return c.Send("Спасибо! Ваше пожелание отправлено и будет доставлено пользователю в запланированное время.")
 }
 
@@ -794,8 +763,8 @@ func (bot *Bot) scheduleFutureWishes() {
 	bot.log.Infof("Scheduled %d future wishes", len(wishes))
 }
 
-// Update handleNotificationTimeInput function
 func (bot *Bot) handleNotificationTimeInput(c tele.Context) error {
+	userID := c.Sender().ID
 	notificationTimeStr := c.Text()
 
 	// Parse the time
@@ -804,7 +773,6 @@ func (bot *Bot) handleNotificationTimeInput(c tele.Context) error {
 		return c.Send("Извините, я не смог понять это время. Пожалуйста, попробуйте еще раз, используя формат ЧЧ:ММ (например, 21:00)")
 	}
 
-	userID := c.Sender().ID
 	user, err := bot.db.GetUser(userID)
 	if err != nil {
 		bot.log.Errorw("failed to load user", "error", err, "userID", userID)
@@ -828,11 +796,10 @@ func (bot *Bot) handleNotificationTimeInput(c tele.Context) error {
 	bot.schedulePlanReminder(user)
 
 	// Registration complete
-	delete(bot.userStates, c.Sender().ID)
+	bot.stateManager.ClearState(userID)
 	return c.Send(fmt.Sprintf("Отлично! Регистрация завершена. Я буду напоминать вам о планах каждый день в %s.", notificationTimeStr))
 }
 
-// Update schedulePlanReminder function
 func (bot *Bot) schedulePlanReminder(user *User) {
 	now := time.Now().UTC()
 	nextNotification := user.NotifyAt
@@ -844,7 +811,6 @@ func (bot *Bot) schedulePlanReminder(user *User) {
 	bot.planSched.Schedule(nextNotification, JobID(user.ID))
 }
 
-// Update AskAboutPlans function
 func (bot *Bot) AskAboutPlans(id JobID) {
 	userID := int64(id)
 	user, err := bot.db.GetUser(userID)
@@ -873,7 +839,6 @@ func (bot *Bot) AskAboutPlans(id JobID) {
 	bot.schedulePlanReminder(user)
 }
 
-// Add new handler for plan reminder callback
 func (bot *Bot) handlePlanReminderCallback(c tele.Context) error {
 	action := c.Data()
 	userID := c.Sender().ID
@@ -886,26 +851,26 @@ func (bot *Bot) handlePlanReminderCallback(c tele.Context) error {
 			bot.log.Errorw("failed to copy plan for next day", "error", err, "userID", userID)
 			return c.Edit("Произошла ошибка при сохранении ваших планов. Пожалуйста, попробуйте позже.")
 		}
+		bot.stateManager.ClearState(userID)
 		return c.Edit("Хорошо, ваши планы и время пробуждения остаются без изменений.")
+
 	case btnUpdatePlans:
 		// Update plans
-		bot.stateMutex.Lock()
-		bot.userStates[userID] = &UserData{State: StateAwaitingPlans}
-		bot.stateMutex.Unlock()
+		bot.stateManager.SetState(userID, StateAwaitingPlans)
 		return c.Edit("Пожалуйста, расскажите о ваших новых планах на завтра.")
+
 	case btnNoWish:
-		bot.stateMutex.Lock()
-		delete(bot.userStates, userID)
-		bot.stateMutex.Unlock()
+		bot.stateManager.ClearState(userID)
 		return c.Edit("Хорошо, вы не получите пожелание завтра.")
+
 	default:
 		return c.Edit("Неизвестный выбор. Пожалуйста, попробуйте еще раз.")
 	}
 }
 
 func (bot *Bot) handleNameUpdate(c tele.Context) error {
-	newName := c.Text()
 	userID := c.Sender().ID
+	newName := c.Text()
 
 	user, err := bot.db.GetUser(userID)
 	if err != nil {
@@ -919,13 +884,13 @@ func (bot *Bot) handleNameUpdate(c tele.Context) error {
 		return c.Send("Извините, произошла ошибка при сохранении вашей информации. Пожалуйста, попробуйте позже.")
 	}
 
-	delete(bot.userStates, userID)
+	bot.stateManager.ClearState(userID)
 	return c.Send(fmt.Sprintf("Ваше имя успешно обновлено на %s.", newName))
 }
 
 func (bot *Bot) handleBioUpdate(c tele.Context) error {
-	newBio := c.Text()
 	userID := c.Sender().ID
+	newBio := c.Text()
 
 	user, err := bot.db.GetUser(userID)
 	if err != nil {
@@ -939,13 +904,13 @@ func (bot *Bot) handleBioUpdate(c tele.Context) error {
 		return c.Send("Извините, произошла ошибка при сохранении вашей информации. Пожалуйста, попробуйте позже.")
 	}
 
-	delete(bot.userStates, userID)
+	bot.stateManager.ClearState(userID)
 	return c.Send("Ваше био успешно обновлено.")
 }
 
 func (bot *Bot) handleTimezoneUpdate(c tele.Context) error {
-	timeStr := c.Text()
 	userID := c.Sender().ID
+	timeStr := c.Text()
 
 	// Parse the time
 	t, err := time.Parse("15:04", timeStr)
@@ -970,13 +935,13 @@ func (bot *Bot) handleTimezoneUpdate(c tele.Context) error {
 		return c.Send("Извините, произошла ошибка при сохранении вашей информации. Пожалуйста, попробуйте позже.")
 	}
 
-	delete(bot.userStates, userID)
+	bot.stateManager.ClearState(userID)
 	return c.Send("Ваш часовой пояс успешно обновлен.")
 }
 
 func (bot *Bot) handlePlansUpdate(c tele.Context) error {
-	newPlans := c.Text()
 	userID := c.Sender().ID
+	newPlans := c.Text()
 
 	plan, err := bot.db.GetLatestPlan(userID)
 	if err != nil {
@@ -990,13 +955,13 @@ func (bot *Bot) handlePlansUpdate(c tele.Context) error {
 		return c.Send("Извините, произошла ошибка при сохранении ваших планов. Пожалуйста, попробуйте позже.")
 	}
 
-	delete(bot.userStates, userID)
+	bot.stateManager.ClearState(userID)
 	return c.Send("Ваши планы успешно обновлены.")
 }
 
 func (bot *Bot) handleWakeTimeUpdate(c tele.Context) error {
-	wakeTimeStr := c.Text()
 	userID := c.Sender().ID
+	wakeTimeStr := c.Text()
 
 	user, err := bot.db.GetUser(userID)
 	if err != nil {
@@ -1032,13 +997,13 @@ func (bot *Bot) handleWakeTimeUpdate(c tele.Context) error {
 		return c.Send("Извините, произошла ошибка при сохранении вашего времени пробуждения. Пожалуйста, попробуйте позже.")
 	}
 
-	delete(bot.userStates, userID)
+	bot.stateManager.ClearState(userID)
 	return c.Send(fmt.Sprintf("Ваше время пробуждения успешно обновлено на %s.", wakeTimeStr))
 }
 
 func (bot *Bot) handleNotificationTimeUpdate(c tele.Context) error {
-	notificationTimeStr := c.Text()
 	userID := c.Sender().ID
+	notificationTimeStr := c.Text()
 
 	user, err := bot.db.GetUser(userID)
 	if err != nil {
@@ -1066,6 +1031,6 @@ func (bot *Bot) handleNotificationTimeUpdate(c tele.Context) error {
 	// Reschedule plan reminder
 	bot.schedulePlanReminder(user)
 
-	delete(bot.userStates, userID)
+	bot.stateManager.ClearState(userID)
 	return c.Send(fmt.Sprintf("Ваше время уведомления успешно обновлено на %s.", notificationTimeStr))
 }

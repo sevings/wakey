@@ -44,7 +44,7 @@ func main() {
 	planSched.Start()
 	defer planSched.Stop()
 
-	bot, ok := wakey.NewBot(cfg, db, wishSched, planSched)
+	bot, ok := wakey.NewBot(db, wishSched, planSched)
 	if !ok {
 		logger.Panic("can't create bot")
 	}
@@ -60,7 +60,7 @@ func main() {
 		logger.Panic(err)
 	}
 
-	bot.Start(api)
+	bot.Start(cfg, api)
 	defer bot.Stop()
 
 	quit := make(chan os.Signal, 1)
