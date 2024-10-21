@@ -3,9 +3,11 @@ package main
 import (
 	"os"
 	"os/signal"
+	"time"
 	"wakey/internal/wakey"
 
 	"go.uber.org/zap"
+	tele "gopkg.in/telebot.v3"
 )
 
 func main() {
@@ -47,7 +49,18 @@ func main() {
 		logger.Panic("can't create bot")
 	}
 
-	bot.Start()
+	pref := tele.Settings{
+		Token:   cfg.TgToken,
+		Poller:  &tele.LongPoller{Timeout: 30 * time.Second},
+		OnError: bot.LogError,
+	}
+
+	api, err := tele.NewBot(pref)
+	if err != nil {
+		logger.Panic(err)
+	}
+
+	bot.Start(api)
 	defer bot.Stop()
 
 	quit := make(chan os.Signal, 1)

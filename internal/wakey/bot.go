@@ -14,7 +14,7 @@ import (
 )
 
 type Bot struct {
-	bot        *tele.Bot
+	api        BotAPI
 	db         *DB
 	wishSched  Scheduler
 	planSched  Scheduler
@@ -22,6 +22,14 @@ type Bot struct {
 	stateMutex sync.Mutex
 	adm        int64
 	log        *zap.SugaredLogger
+}
+
+type BotAPI interface {
+	Send(to tele.Recipient, what interface{}, opts ...interface{}) (*tele.Message, error)
+	Handle(endpoint interface{}, h tele.HandlerFunc, m ...tele.MiddlewareFunc)
+	Use(middlewares ...tele.MiddlewareFunc)
+	Start()
+	Stop()
 }
 
 type JobID uint
@@ -95,44 +103,33 @@ func NewBot(cfg Config, db *DB, wishSched, planSched Scheduler) (*Bot, bool) {
 	bot.wishSched.SetJobFunc(bot.SendWish)
 	bot.planSched.SetJobFunc(bot.AskAboutPlans)
 
-	pref := tele.Settings{
-		Token:   cfg.TgToken,
-		Poller:  &tele.LongPoller{Timeout: 30 * time.Second},
-		OnError: bot.logError,
-	}
+	return bot, true
+}
 
-	b, err := tele.NewBot(pref)
-	if err != nil {
-		bot.log.Error(err)
-		return nil, false
-	}
-	bot.bot = b
+func (bot *Bot) Start(api BotAPI) {
+	bot.api = api
 
-	bot.bot.Use(middleware.Recover())
-	bot.bot.Use(bot.logCmd)
+	bot.api.Use(middleware.Recover())
+	bot.api.Use(bot.logCmd)
 
-	bot.bot.Handle(tele.OnCallback, bot.handleCallback)
-	bot.bot.Handle("/start", bot.handleStart)
-	bot.bot.Handle("/set_plans", bot.handleSetPlans)
-	bot.bot.Handle("/show_plan", bot.handleShowPlan)
-	bot.bot.Handle(tele.OnText, bot.handleText)
+	bot.api.Handle(tele.OnCallback, bot.handleCallback)
+	bot.api.Handle("/start", bot.handleStart)
+	bot.api.Handle("/set_plans", bot.handleSetPlans)
+	bot.api.Handle("/show_plan", bot.handleShowPlan)
+	bot.api.Handle(tele.OnText, bot.handleText)
 
 	// Load and schedule future wishes
 	bot.scheduleFutureWishes()
 
-	return bot, true
-}
-
-func (bot *Bot) Start() {
 	go func() {
 		bot.log.Info("starting bot")
-		bot.bot.Start()
+		bot.api.Start()
 		bot.log.Info("bot stopped")
 	}()
 }
 
 func (bot *Bot) Stop() {
-	bot.bot.Stop()
+	bot.api.Stop()
 }
 
 func (bot *Bot) logMessage(c tele.Context, beginTime int64, err error) {
@@ -157,14 +154,9 @@ func (bot *Bot) logMessage(c tele.Context, beginTime int64, err error) {
 }
 
 func (bot *Bot) logCmd(next tele.HandlerFunc) tele.HandlerFunc {
-	mention := "@" + bot.bot.Me.Username
-
 	return func(c tele.Context) error {
 		beginTime := time.Now().UnixNano()
-		isBotCmd := len(c.Text()) > 0 && c.Text()[0] == '/' && len(c.Entities()) == 1 &&
-			(c.Chat().Type == tele.ChatPrivate ||
-				strings.Contains(c.Text(), mention) ||
-				!strings.Contains(c.Text(), "@"))
+		isBotCmd := len(c.Text()) > 0 && c.Text()[0] == '/' && len(c.Entities()) == 1
 
 		err := next(c)
 
@@ -176,7 +168,7 @@ func (bot *Bot) logCmd(next tele.HandlerFunc) tele.HandlerFunc {
 	}
 }
 
-func (bot *Bot) logError(err error, c tele.Context) {
+func (bot *Bot) LogError(err error, c tele.Context) {
 	if c == nil {
 		bot.log.Errorw("error", "err", err)
 	} else {
@@ -318,7 +310,7 @@ func (bot *Bot) handleBanCallback(c tele.Context) error {
 
 		// Notify the banned user
 		banMessage := "Вы были забанены за нарушение правил использования бота. Вы больше не сможете отправлять или получать пожелания."
-		_, err = bot.bot.Send(tele.ChatID(userID), banMessage)
+		_, err = bot.api.Send(tele.ChatID(userID), banMessage)
 		if err != nil {
 			bot.log.Errorw("failed to send ban notification to user", "error", err, "userID", userID)
 		}
@@ -589,7 +581,7 @@ func (bot *Bot) handleWakeTimeInput(c tele.Context, state *UserData) error {
 func (bot *Bot) handleWishLike(c tele.Context, wish *Wish) error {
 	// Send message to the wish author
 	thanksMsg := fmt.Sprintf("Пользователю %s понравилось ваше пожелание.", wish.Plan.User.Name)
-	_, err := bot.bot.Send(tele.ChatID(wish.FromID), thanksMsg)
+	_, err := bot.api.Send(tele.ChatID(wish.FromID), thanksMsg)
 	if err != nil {
 		bot.log.Errorw("failed to send thanks message", "error", err, "userID", wish.FromID)
 	}
@@ -614,7 +606,7 @@ func (bot *Bot) handleWishReport(c tele.Context, wish *Wish) error {
 			inlineKeyboard.Row(btnBan, btnSkip),
 		)
 
-		_, err := bot.bot.Send(tele.ChatID(bot.adm), reportMsg, inlineKeyboard)
+		_, err := bot.api.Send(tele.ChatID(bot.adm), reportMsg, inlineKeyboard)
 		if err != nil {
 			bot.log.Errorw("failed to send report to admin", "error", err)
 		}
@@ -781,7 +773,7 @@ func (bot *Bot) SendWish(id JobID) {
 	)
 
 	// Send message with inline keyboard
-	_, err = bot.bot.Send(tele.ChatID(wish.Plan.UserID), message, inlineKeyboard)
+	_, err = bot.api.Send(tele.ChatID(wish.Plan.UserID), message, inlineKeyboard)
 	if err != nil {
 		bot.log.Errorw("failed to send wish", "error", err, "userID", wish.Plan.UserID)
 	}
@@ -872,7 +864,7 @@ func (bot *Bot) AskAboutPlans(id JobID) {
 		inlineKeyboard.Row(btnNoWish),
 	)
 
-	_, err = bot.bot.Send(tele.ChatID(userID), "Пора рассказать о ваших планах на завтра! Что вы хотите сделать?", inlineKeyboard)
+	_, err = bot.api.Send(tele.ChatID(userID), "Пора рассказать о ваших планах на завтра! Что вы хотите сделать?", inlineKeyboard)
 	if err != nil {
 		bot.log.Errorw("failed to send plan reminder", "error", err, "userID", userID)
 	}
