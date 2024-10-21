@@ -34,7 +34,15 @@ func main() {
 		logger.Panic("can't load database")
 	}
 
-	bot, ok := wakey.NewBot(cfg, db)
+	wishSched := wakey.NewSched(cfg.MaxJobs)
+	wishSched.Start()
+	defer wishSched.Stop()
+
+	planSched := wakey.NewSched(cfg.MaxJobs)
+	planSched.Start()
+	defer planSched.Stop()
+
+	bot, ok := wakey.NewBot(cfg, db, wishSched, planSched)
 	if !ok {
 		logger.Panic("can't create bot")
 	}

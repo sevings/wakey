@@ -1,4 +1,5 @@
 tg_token = "your_telegram_bot_token"
 db_path = "../wakey.sqlite"
 release = false
-admin_id = 1
+admin_id = 0
+max_jobs = 100

@@ -13,6 +13,7 @@ type Config struct {
 	DBPath  string `koanf:"db_path"`
 	Release bool
 	AdminID int64 `koanf:"admin_id"`
+	MaxJobs int   `koand:"max_jobs"`
 }
 
 func LoadConfig() (Config, error) {
