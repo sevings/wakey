@@ -48,6 +48,7 @@ const (
 	btnKeepPlans        = "keep_plans"
 	btnUpdatePlans      = "update_plans"
 	btnNoWish           = "no_wish"
+	btnShowProfile      = "show_profile"
 	btnChangeName       = "change_name"
 	btnChangeBio        = "change_bio"
 	btnChangeTimezone   = "change_timezone"
@@ -208,6 +209,8 @@ func (bot *Bot) handleCallback(c tele.Context) error {
 		return bot.handlePlanReminderCallback(c)
 	case btnBanUser, btnSkipBan:
 		return bot.handleBanCallback(c)
+	case btnShowProfile:
+		return bot.handleShowProfile(c)
 	case btnChangeName, btnChangeBio, btnChangeTimezone, btnChangePlans, btnChangeWakeTime, btnChangeNotifyTime, btnDoNothing:
 		return bot.handleActionCallback(c)
 	}
@@ -399,6 +402,7 @@ func (bot *Bot) handleText(c tele.Context) error {
 func (bot *Bot) suggestActions(c tele.Context) error {
 	inlineKeyboard := &tele.ReplyMarkup{}
 
+	btnShowProfile := inlineKeyboard.Data("Показать мой профиль", btnShowProfile)
 	btnChangeName := inlineKeyboard.Data("Изменить имя", btnChangeName)
 	btnChangeBio := inlineKeyboard.Data("Изменить био", btnChangeBio)
 	btnChangeTimezone := inlineKeyboard.Data("Изменить часовой пояс", btnChangeTimezone)
@@ -408,9 +412,13 @@ func (bot *Bot) suggestActions(c tele.Context) error {
 	btnDoNothing := inlineKeyboard.Data("Ничего, до свидания", btnDoNothing)
 
 	inlineKeyboard.Inline(
-		inlineKeyboard.Row(btnChangeName, btnChangeBio),
-		inlineKeyboard.Row(btnChangeTimezone, btnChangePlans),
-		inlineKeyboard.Row(btnChangeWakeTime, btnChangeNotifyTime),
+		inlineKeyboard.Row(btnShowProfile),
+		inlineKeyboard.Row(btnChangeName),
+		inlineKeyboard.Row(btnChangeBio),
+		inlineKeyboard.Row(btnChangeTimezone),
+		inlineKeyboard.Row(btnChangePlans),
+		inlineKeyboard.Row(btnChangeWakeTime),
+		inlineKeyboard.Row(btnChangeNotifyTime),
 		inlineKeyboard.Row(btnDoNothing),
 	)
 
@@ -592,6 +600,54 @@ func (bot *Bot) removeWishKeyboard(c tele.Context) error {
 	}
 
 	return c.Send("Спасибо за ваш ответ!")
+}
+
+func (bot *Bot) handleShowProfile(c tele.Context) error {
+	userID := c.Sender().ID
+
+	user, err := bot.db.GetUser(userID)
+	if err != nil {
+		bot.log.Errorw("failed to load user", "error", err)
+		return c.Edit("Извините, произошла ошибка при загрузке вашего профиля. Пожалуйста, попробуйте позже.")
+	}
+
+	plan, err := bot.db.GetLatestPlan(userID)
+	if err != nil && err != ErrNotFound {
+		bot.log.Errorw("failed to load latest plan", "error", err)
+		return c.Edit("Извините, произошла ошибка при загрузке ваших планов. Пожалуйста, попробуйте позже.")
+	}
+
+	userLoc := time.FixedZone("User Timezone", int(user.Tz)*60)
+	localWakeTime := "Не установлено"
+	localNotifyTime := user.NotifyAt.In(userLoc).Format("15:04")
+
+	if plan != nil {
+		localWakeTime = plan.WakeAt.In(userLoc).Format("15:04")
+	}
+
+	profileMsg := fmt.Sprintf("Ваш профиль:\n\n"+
+		"Имя: %s\n"+
+		"Био: %s\n"+
+		"Часовой пояс: UTC%+d\n"+
+		"Время пробуждения: %s\n"+
+		"Время уведомления: %s\n",
+		user.Name, user.Bio, user.Tz/60, localWakeTime, localNotifyTime)
+
+	if plan != nil {
+		profileMsg += fmt.Sprintf("Текущие планы: %s", plan.Content)
+	} else {
+		profileMsg += "Текущие планы: Не установлены"
+	}
+
+	// First, edit the current message to show the profile
+	err = c.Edit(profileMsg)
+	if err != nil {
+		bot.log.Errorw("failed to edit message with profile", "error", err)
+		return err
+	}
+
+	// Then, send a new message with suggested actions
+	return bot.suggestActions(c)
 }
 
 func (bot *Bot) handleSendWishResponse(c tele.Context) error {
