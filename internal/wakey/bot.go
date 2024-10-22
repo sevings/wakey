@@ -80,6 +80,7 @@ func (bot *Bot) Start(cfg Config, api BotAPI) {
 
 	bot.api.Use(middleware.Recover())
 	bot.api.Use(bot.logCmd)
+	bot.api.Use(bot.checkBan)
 
 	bot.api.Handle(tele.OnCallback, bot.handleCallback)
 	bot.api.Handle("/start", bot.handleStart)
@@ -168,18 +169,31 @@ func (bot *Bot) LogError(err error, c tele.Context) {
 	}
 }
 
-func (bot *Bot) handleCallback(c tele.Context) error {
-	userID := c.Sender().ID
+func (bot *Bot) checkBan(next tele.HandlerFunc) tele.HandlerFunc {
+	return func(c tele.Context) error {
+		userID := c.Sender().ID
 
-	// Check if user exists and is banned
-	user, err := bot.db.GetUser(userID)
-	if err == nil && user.IsBanned {
-		return c.Send(&tele.CallbackResponse{
-			Text:      "Извините, вы не можете использовать бота, так как были забанены.",
-			ShowAlert: true,
-		})
+		// Check if user exists and is banned
+		user, err := bot.db.GetUser(userID)
+		if err == nil && user.IsBanned {
+			const msg = "Извините, вы не можете использовать бота, так как были забанены."
+			// Check if it's a callback query
+			if c.Callback() != nil {
+				return c.Respond(&tele.CallbackResponse{
+					Text:      msg,
+					ShowAlert: true,
+				})
+			}
+			// For regular messages
+			return c.Send(msg)
+		}
+
+		// If the user is not banned or doesn't exist, continue to the next handler
+		return next(c)
 	}
+}
 
+func (bot *Bot) handleCallback(c tele.Context) error {
 	data := strings.Split(c.Data(), ":")
 	action := strings.TrimSpace(data[0])
 
@@ -298,13 +312,8 @@ func (bot *Bot) handleBanCallback(c tele.Context) error {
 func (bot *Bot) handleStart(c tele.Context) error {
 	userID := c.Sender().ID
 
-	// Check if user already exists and is banned
-	user, err := bot.db.GetUser(userID)
-	if err == nil && user.IsBanned {
-		return c.Send("Извините, вы не можете использовать бота, так как были забанены.")
-	}
-
 	// Check if user already exists
+	user, err := bot.db.GetUser(userID)
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		bot.log.Errorw("failed to check user existence", "error", err)
 		return c.Send("Извините, произошла ошибка. Пожалуйста, попробуйте позже.")
@@ -341,24 +350,12 @@ func (bot *Bot) getWelcomeMessage() string {
 func (bot *Bot) handleSetPlans(c tele.Context) error {
 	userID := c.Sender().ID
 
-	// Check if user exists and is banned
-	user, err := bot.db.GetUser(userID)
-	if err == nil && user.IsBanned {
-		return c.Send("Извините, вы не можете использовать бота, так как были забанены.")
-	}
-
 	bot.stateManager.SetState(userID, StateAwaitingPlans)
 	return c.Send("Пожалуйста, расскажите о ваших планах на завтра.")
 }
 
 func (bot *Bot) handleText(c tele.Context) error {
 	userID := c.Sender().ID
-
-	// Check if the user exists and is banned
-	user, err := bot.db.GetUser(userID)
-	if err == nil && user.IsBanned {
-		return c.Send("Извините, вы не можете использовать бота, так как были забанены.")
-	}
 
 	state, exists := bot.stateManager.GetState(userID)
 	if !exists {
@@ -609,12 +606,6 @@ func (bot *Bot) handleSendWishNo(c tele.Context) error {
 func (bot *Bot) findUserForWish(c tele.Context) error {
 	senderID := c.Sender().ID
 
-	// Check if sender is banned
-	sender, err := bot.db.GetUser(senderID)
-	if err == nil && sender.IsBanned {
-		return c.Send("Извините, вы не можете отправлять пожелания, так как были забанены.")
-	}
-
 	plan, err := bot.db.FindUserForWish(senderID)
 	if err != nil {
 		if err == ErrNotFound {
@@ -650,10 +641,6 @@ func (bot *Bot) handleShowPlan(c tele.Context) error {
 	if err != nil {
 		bot.log.Errorw("failed to load user", "error", err)
 		return c.Send("Извините, произошла ошибка. Пожалуйста, попробуйте позже.")
-	}
-
-	if user.IsBanned {
-		return c.Send("Извините, вы не можете использовать бота, так как были забанены.")
 	}
 
 	plan, err := bot.db.GetLatestPlan(c.Sender().ID)
