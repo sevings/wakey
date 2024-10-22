@@ -15,9 +15,9 @@ import (
 type Bot struct {
 	api          BotAPI
 	db           *DB
-	wishSched    Scheduler
 	stateManager *StateManager
 	planHandler  *PlanHandler
+	wishHandler  *WishHandler
 	adm          int64
 	log          *zap.SugaredLogger
 }
@@ -63,20 +63,12 @@ const (
 func NewBot(db *DB, wishSched, planSched Scheduler) (*Bot, bool) {
 	bot := &Bot{
 		db:           db,
-		wishSched:    wishSched,
 		stateManager: NewStateManager(),
 		log:          zap.L().Named("bot").Sugar(),
 	}
 
-	bot.planHandler = &PlanHandler{
-		db:        db,
-		stateMan:  bot.stateManager,
-		planSched: planSched,
-		log:       bot.log,
-	}
-	planSched.SetJobFunc(bot.planHandler.AskAboutPlans)
-
-	bot.wishSched.SetJobFunc(bot.SendWish)
+	bot.planHandler = NewPlanHandler(db, planSched, bot.stateManager, bot.log)
+	bot.wishHandler = NewWishHandler(db, wishSched, bot.stateManager, bot.log)
 
 	return bot, true
 }
@@ -85,6 +77,8 @@ func (bot *Bot) Start(cfg Config, api BotAPI) {
 	bot.adm = cfg.AdminID
 	bot.api = api
 	bot.planHandler.api = api
+	bot.wishHandler.api = api
+	bot.wishHandler.adm = cfg.AdminID
 
 	bot.api.Use(middleware.Recover())
 	bot.api.Use(bot.logCmd)
@@ -97,7 +91,7 @@ func (bot *Bot) Start(cfg Config, api BotAPI) {
 	bot.api.Handle(tele.OnText, bot.handleText)
 
 	// Load and schedule future wishes
-	bot.scheduleFutureWishes()
+	bot.wishHandler.ScheduleFutureWishes()
 
 	// Start the state manager cleanup routine
 	cleanupInterval := time.Duration(cfg.MaxStateAge) / 10 * time.Hour
@@ -207,11 +201,11 @@ func (bot *Bot) handleCallback(c tele.Context) error {
 
 	switch action {
 	case btnSendWishYes:
-		return bot.handleSendWishResponse(c)
+		return bot.wishHandler.HandleSendWishResponse(c)
 	case btnSendWishNo:
-		return bot.handleSendWishNo(c)
+		return bot.wishHandler.HandleSendWishNo(c)
 	case btnWishDislike:
-		return bot.handleWishDislike(c)
+		return bot.wishHandler.HandleWishDislike(c)
 	case btnKeepPlans, btnUpdatePlans, btnNoWish:
 		return bot.planHandler.HandlePlanReminderCallback(c)
 	case btnBanUser, btnSkipBan:
@@ -239,9 +233,9 @@ func (bot *Bot) handleCallback(c tele.Context) error {
 
 	switch action {
 	case btnWishLike:
-		return bot.handleWishLike(c, wish)
+		return bot.wishHandler.HandleWishLike(c, wish)
 	case btnWishReport:
-		return bot.handleWishReport(c, wish)
+		return bot.wishHandler.HandleWishReport(c, wish)
 	default:
 		return c.Send("Неизвестный выбор.")
 	}
@@ -379,7 +373,7 @@ func (bot *Bot) handleText(c tele.Context) error {
 	case StateAwaitingWakeTime:
 		return bot.planHandler.HandleWakeTimeInput(c)
 	case StateAwaitingWish:
-		return bot.handleWishInput(c)
+		return bot.wishHandler.HandleWishInput(c)
 	case StateAwaitingNotificationTime:
 		return bot.planHandler.HandleNotificationTimeInput(c)
 	case StateUpdatingName:
@@ -497,54 +491,6 @@ func (bot *Bot) handleTimeInput(c tele.Context) error {
 	return c.Send("Отлично! Теперь расскажите о ваших планах на завтра.")
 }
 
-func (bot *Bot) handleWishLike(c tele.Context, wish *Wish) error {
-	// Send message to the wish author
-	thanksMsg := fmt.Sprintf("Пользователю %s понравилось ваше пожелание.", wish.Plan.User.Name)
-	_, err := bot.api.Send(tele.ChatID(wish.FromID), thanksMsg)
-	if err != nil {
-		bot.log.Errorw("failed to send thanks message", "error", err, "userID", wish.FromID)
-	}
-
-	// Remove the inline keyboard
-	return bot.removeWishKeyboard(c)
-}
-
-func (bot *Bot) handleWishDislike(c tele.Context) error {
-	// Just remove the inline keyboard
-	return bot.removeWishKeyboard(c)
-}
-
-func (bot *Bot) handleWishReport(c tele.Context, wish *Wish) error {
-	if bot.adm != 0 {
-		reportMsg := fmt.Sprintf("Жалоба на пожелание:\n\nАвтор ID: %d\nТекст пожелания: %s", wish.FromID, wish.Content)
-
-		inlineKeyboard := &tele.ReplyMarkup{}
-		btnBan := inlineKeyboard.Data("Забанить", btnBanUser, fmt.Sprintf("%d", wish.FromID))
-		btnSkip := inlineKeyboard.Data("Пропустить", btnSkipBan, fmt.Sprintf("%d", wish.FromID))
-		inlineKeyboard.Inline(
-			inlineKeyboard.Row(btnBan, btnSkip),
-		)
-
-		_, err := bot.api.Send(tele.ChatID(bot.adm), reportMsg, inlineKeyboard)
-		if err != nil {
-			bot.log.Errorw("failed to send report to admin", "error", err)
-		}
-	}
-
-	return bot.removeWishKeyboard(c)
-}
-
-func (bot *Bot) removeWishKeyboard(c tele.Context) error {
-	// Edit the original message to remove the inline keyboard
-	err := c.Edit(c.Message().Text)
-	if err != nil {
-		bot.log.Errorw("failed to remove wish keyboard", "error", err)
-		return c.Send("Произошла ошибка при обработке вашего ответа.")
-	}
-
-	return c.Send("Спасибо за ваш ответ!")
-}
-
 func (bot *Bot) handleShowProfile(c tele.Context) error {
 	userID := c.Sender().ID
 
@@ -591,142 +537,6 @@ func (bot *Bot) handleShowProfile(c tele.Context) error {
 
 	// Then, send a new message with suggested actions
 	return bot.suggestActions(c)
-}
-
-func (bot *Bot) handleSendWishResponse(c tele.Context) error {
-	// Remove the inline keyboard
-	err := c.Edit("Хорошо, давайте отправим пожелание!")
-	if err != nil {
-		bot.log.Errorw("failed to remove send wish keyboard", "error", err)
-	}
-
-	return bot.findUserForWish(c)
-}
-
-func (bot *Bot) handleSendWishNo(c tele.Context) error {
-	// Remove the inline keyboard
-	err := c.Edit("Хорошо, может быть в следующий раз!")
-	if err != nil {
-		bot.log.Errorw("failed to remove send wish keyboard", "error", err)
-		return c.Send("Произошла ошибка при обработке вашего ответа.")
-	}
-	return nil
-}
-
-func (bot *Bot) findUserForWish(c tele.Context) error {
-	senderID := c.Sender().ID
-
-	plan, err := bot.db.FindUserForWish(senderID)
-	if err != nil {
-		if err == ErrNotFound {
-			return c.Send("К сожалению, сейчас нет пользователей, которым можно отправить пожелание.")
-		}
-		bot.log.Errorw("failed to find user for wish", "error", err)
-		return c.Send("Извините, произошла ошибка. Пожалуйста, попробуйте позже.")
-	}
-
-	userInfo := fmt.Sprintf("Имя: %s\nО себе: %s\nПланы: %s",
-		plan.User.Name, plan.User.Bio, plan.Content)
-
-	// Set user state and data
-	userData := &UserData{
-		State:        StateAwaitingWish,
-		TargetUserID: plan.User.ID,
-		TargetPlanID: plan.ID,
-	}
-	bot.stateManager.SetUserData(senderID, userData)
-
-	return c.Send(fmt.Sprintf("Отправьте ваше пожелание для этого пользователя:\n\n%s", userInfo))
-}
-
-func (bot *Bot) handleWishInput(c tele.Context) error {
-	userID := c.Sender().ID
-	userData, _ := bot.stateManager.GetUserData(userID)
-	if userData == nil {
-		return c.Send("Извините, произошла ошибка. Пожалуйста, начните процесс заново.")
-	}
-
-	plan, err := bot.db.GetPlanByID(userData.TargetPlanID)
-	if err != nil {
-		bot.log.Errorw("failed to get plan", "error", err)
-		return c.Send("Извините, произошла ошибка. Пожалуйста, попробуйте позже.")
-	}
-
-	if time.Now().UTC().Sub(plan.OfferedAt) > time.Hour {
-		bot.stateManager.ClearState(userID)
-		return c.Send("Извините, время для отправки пожелания истекло. Пожалуйста, попробуйте отправить новое пожелание.")
-	}
-
-	wish := &Wish{
-		FromID:  userID,
-		PlanID:  userData.TargetPlanID,
-		Content: c.Text(),
-	}
-
-	if err := bot.db.SaveWish(wish); err != nil {
-		bot.log.Errorw("failed to save wish", "error", err)
-		return c.Send("Извините, произошла ошибка при сохранении вашего пожелания. Пожалуйста, попробуйте позже.")
-	}
-
-	bot.wishSched.Schedule(plan.WakeAt, JobID(wish.ID))
-
-	bot.stateManager.ClearState(userID)
-	return c.Send("Спасибо! Ваше пожелание отправлено и будет доставлено пользователю в запланированное время.")
-}
-
-func (bot *Bot) SendWish(id JobID) {
-	wishID := uint(id)
-	wish, err := bot.db.GetWishByID(wishID)
-	if err != nil {
-		bot.log.Errorw("failed to get wish", "error", err, "wishID", wishID)
-		return
-	}
-
-	// Check if the recipient is banned
-	recipient, err := bot.db.GetUser(wish.Plan.UserID)
-	if err != nil {
-		bot.log.Errorw("failed to get recipient", "error", err, "userID", wish.Plan.UserID)
-		return
-	}
-
-	if recipient.IsBanned {
-		bot.log.Infow("skipping wish for banned user", "userID", wish.Plan.UserID)
-		return
-	}
-
-	message := fmt.Sprintf("Доброе утро! Вот пожелание для вас:\n\n%s", wish.Content)
-
-	// Create inline keyboard
-	inlineKeyboard := &tele.ReplyMarkup{}
-	btnLike := inlineKeyboard.Data("Спасибо, понравилось", btnWishLike, fmt.Sprintf("%d", wishID))
-	btnDislike := inlineKeyboard.Data("Ну такое…", btnWishDislike, fmt.Sprintf("%d", wishID))
-	btnReport := inlineKeyboard.Data("Пожаловаться", btnWishReport, fmt.Sprintf("%d", wishID))
-	inlineKeyboard.Inline(
-		inlineKeyboard.Row(btnLike),
-		inlineKeyboard.Row(btnDislike),
-		inlineKeyboard.Row(btnReport),
-	)
-
-	// Send message with inline keyboard
-	_, err = bot.api.Send(tele.ChatID(wish.Plan.UserID), message, inlineKeyboard)
-	if err != nil {
-		bot.log.Errorw("failed to send wish", "error", err, "userID", wish.Plan.UserID)
-	}
-}
-
-func (bot *Bot) scheduleFutureWishes() {
-	wishes, err := bot.db.GetFutureWishes()
-	if err != nil {
-		bot.log.Errorw("failed to schedule future wishes", "error", err)
-		return
-	}
-
-	for _, wish := range wishes {
-		bot.wishSched.Schedule(wish.Plan.WakeAt, JobID(wish.ID))
-		bot.log.Infow("scheduled wish", "wishID", wish.ID, "wakeAt", wish.Plan.WakeAt)
-	}
-
-	bot.log.Infof("Scheduled %d future wishes", len(wishes))
 }
 
 func (bot *Bot) handleNameUpdate(c tele.Context) error {
