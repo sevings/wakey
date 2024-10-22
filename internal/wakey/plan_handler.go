@@ -2,6 +2,7 @@ package wakey
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -56,7 +57,8 @@ func (ph *PlanHandler) HandleAction(c tele.Context, action string) error {
 		return c.Edit("Пожалуйста, введите новое время пробуждения в формате ЧЧ:ММ.")
 	case btnChangeNotifyTime:
 		ph.stateMan.SetState(userID, StateUpdatingNotificationTime)
-		return c.Edit("Пожалуйста, введите новое время уведомления в формате ЧЧ:ММ.")
+		return c.Edit("Пожалуйста, введите новое время уведомления в формате ЧЧ:ММ. " +
+			"Если вы хотите отключить уведомления, отправьте 'отключить'.")
 	case btnKeepPlans:
 		err := ph.db.CopyPlanForNextDay(userID)
 		if err != nil {
@@ -109,6 +111,11 @@ func (ph *PlanHandler) HandleState(c tele.Context, state UserState) error {
 }
 
 func (ph *PlanHandler) schedulePlanReminder(user *User) {
+	if user.NotifyAt.IsZero() {
+		ph.planSched.Cancel(JobID(user.ID))
+		return
+	}
+
 	now := time.Now().UTC()
 	nextNotification := user.NotifyAt
 
@@ -158,22 +165,9 @@ func (ph *PlanHandler) HandleWakeTimeInput(c tele.Context) error {
 		return c.Send("Извините, произошла ошибка при сохранении вашей информации. Пожалуйста, попробуйте позже.")
 	}
 
-	ph.stateMan.ClearState(userID)
-
-	err = c.Send("Спасибо! Ваши планы и время пробуждения сохранены.")
-	if err != nil {
-		return err
-	}
-
-	// Ask if the user wants to send a wish
-	inlineKeyboard := &tele.ReplyMarkup{}
-	btnYes := inlineKeyboard.Data("Да", btnSendWishYes)
-	btnNo := inlineKeyboard.Data("Нет", btnSendWishNo)
-	inlineKeyboard.Inline(
-		inlineKeyboard.Row(btnYes, btnNo),
-	)
-
-	return c.Send("Хотите отправить пожелание другому пользователю?", inlineKeyboard)
+	// Ask for notification time
+	ph.stateMan.SetState(userID, StateAwaitingNotificationTime)
+	return c.Send("Отлично! Теперь укажите, в какое время вы хотели бы получать напоминание о планах на следующий день? (Используйте формат ЧЧ:ММ или отправьте 'отключить', чтобы отключить уведомления)")
 }
 
 func (ph *PlanHandler) HandlePlansUpdate(c tele.Context) error {
@@ -281,24 +275,45 @@ func (ph *PlanHandler) HandleNotificationTimeInput(c tele.Context) error {
 		return c.Send("Извините, произошла ошибка. Пожалуйста, попробуйте позже.")
 	}
 
-	notifyAtUTC, err := parseTime(notificationTimeStr, user.Tz)
-	if err != nil {
-		return c.Send(err.Error())
+	if strings.ToLower(notificationTimeStr) == "отключить" {
+		user.NotifyAt = time.Time{} // Set to zero time to indicate notifications are disabled
+	} else {
+		notifyAtUTC, err := parseTime(notificationTimeStr, user.Tz)
+		if err != nil {
+			return c.Send(err.Error())
+		}
+		user.NotifyAt = notifyAtUTC
 	}
-	user.NotifyAt = notifyAtUTC
 
-	// Save user to database
 	if err := ph.db.SaveUser(user); err != nil {
 		ph.log.Errorw("failed to save user", "error", err)
 		return c.Send("Извините, произошла ошибка при сохранении вашей информации. Пожалуйста, попробуйте позже.")
 	}
 
-	// Schedule asking about plans
 	ph.schedulePlanReminder(user)
-
-	// Registration complete
 	ph.stateMan.ClearState(userID)
-	return c.Send(fmt.Sprintf("Отлично! Регистрация завершена. Я буду напоминать вам о планах каждый день в %s.", notificationTimeStr))
+	// Inform user about notification settings
+	var notificationMsg string
+	if user.NotifyAt.IsZero() {
+		notificationMsg = "Уведомления о планах отключены."
+	} else {
+		notificationMsg = fmt.Sprintf("Я буду напоминать вам о планах каждый день в %s.", notificationTimeStr)
+	}
+
+	err = c.Send(fmt.Sprintf("Отлично! Регистрация завершена. %s", notificationMsg))
+	if err != nil {
+		return err
+	}
+
+	// Ask if the user wants to send a wish
+	inlineKeyboard := &tele.ReplyMarkup{}
+	btnYes := inlineKeyboard.Data("Да", btnSendWishYes)
+	btnNo := inlineKeyboard.Data("Нет", btnSendWishNo)
+	inlineKeyboard.Inline(
+		inlineKeyboard.Row(btnYes, btnNo),
+	)
+
+	return c.Send("Хотите отправить пожелание другому пользователю?", inlineKeyboard)
 }
 
 func (ph *PlanHandler) HandleNotificationTimeUpdate(c tele.Context) error {
@@ -311,20 +326,27 @@ func (ph *PlanHandler) HandleNotificationTimeUpdate(c tele.Context) error {
 		return c.Send("Извините, произошла ошибка. Пожалуйста, попробуйте позже.")
 	}
 
-	notifyAtUTC, err := parseTime(notificationTimeStr, user.Tz)
-	if err != nil {
-		return c.Send(err.Error())
+	if strings.ToLower(notificationTimeStr) == "выключить" {
+		user.NotifyAt = time.Time{} // Set to zero time to indicate notifications are disabled
+	} else {
+		notifyAtUTC, err := parseTime(notificationTimeStr, user.Tz)
+		if err != nil {
+			return c.Send(err.Error())
+		}
+		user.NotifyAt = notifyAtUTC
 	}
-	user.NotifyAt = notifyAtUTC
 
 	if err := ph.db.SaveUser(user); err != nil {
 		ph.log.Errorw("failed to save user", "error", err)
 		return c.Send("Извините, произошла ошибка при сохранении вашей информации. Пожалуйста, попробуйте позже.")
 	}
 
-	// Reschedule plan reminder
 	ph.schedulePlanReminder(user)
-
 	ph.stateMan.ClearState(userID)
+
+	if user.NotifyAt.IsZero() {
+		return c.Send("Уведомления о планах отключены.")
+	}
+
 	return c.Send(fmt.Sprintf("Ваше время уведомления успешно обновлено на %s.", notificationTimeStr))
 }
