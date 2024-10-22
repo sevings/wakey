@@ -18,6 +18,7 @@ type Bot struct {
 	planHandler    *PlanHandler
 	wishHandler    *WishHandler
 	profileHandler *ProfileHandler
+	adminHandler   *AdminHandler
 	adm            int64
 	log            *zap.SugaredLogger
 }
@@ -70,6 +71,7 @@ func NewBot(db *DB, wishSched, planSched Scheduler) (*Bot, bool) {
 	bot.planHandler = NewPlanHandler(db, planSched, bot.stateManager, bot.log)
 	bot.wishHandler = NewWishHandler(db, wishSched, bot.stateManager, bot.log)
 	bot.profileHandler = NewProfileHandler(db, bot.stateManager, bot.log)
+	bot.adminHandler = NewAdminHandler(db, bot.log)
 
 	return bot, true
 }
@@ -80,6 +82,8 @@ func (bot *Bot) Start(cfg Config, api BotAPI) {
 	bot.planHandler.api = api
 	bot.wishHandler.api = api
 	bot.wishHandler.adm = cfg.AdminID
+	bot.adminHandler.api = api
+	bot.adminHandler.adm = cfg.AdminID
 
 	bot.api.Use(middleware.Recover())
 	bot.api.Use(bot.logCmd)
@@ -210,7 +214,7 @@ func (bot *Bot) handleCallback(c tele.Context) error {
 	case btnKeepPlans, btnUpdatePlans, btnNoWish:
 		return bot.planHandler.HandlePlanReminderCallback(c)
 	case btnBanUser, btnSkipBan:
-		return bot.handleBanCallback(c)
+		return bot.adminHandler.HandleBanCallback(c)
 	case btnShowProfile:
 		return bot.profileHandler.HandleShowProfile(c)
 	case btnChangeName, btnChangeBio, btnChangeTimezone, btnChangePlans, btnChangeWakeTime, btnChangeNotifyTime, btnDoNothing:
@@ -270,49 +274,6 @@ func (bot *Bot) handleActionCallback(c tele.Context) error {
 		return c.Edit("Хорошо, до свидания! Если вам что-то понадобится, просто напишите мне.")
 	default:
 		return c.Edit("Неизвестный выбор. Пожалуйста, попробуйте еще раз.")
-	}
-}
-
-func (bot *Bot) handleBanCallback(c tele.Context) error {
-	if c.Sender().ID != bot.adm {
-		return nil
-	}
-
-	data := strings.Split(c.Data(), ":")
-	action := data[0]
-	userIDStr := data[1]
-
-	userID, err := strconv.ParseInt(userIDStr, 10, 64)
-	if err != nil {
-		return c.Edit("Ошибка при обработке ID пользователя.")
-	}
-
-	user, err := bot.db.GetUser(userID)
-	if err != nil {
-		bot.log.Errorw("failed to get user", "error", err, "userID", userID)
-		return c.Edit("Ошибка при получении информации о пользователе.")
-	}
-
-	switch action {
-	case btnBanUser:
-		user.IsBanned = true
-		if err := bot.db.SaveUser(user); err != nil {
-			bot.log.Errorw("failed to ban user", "error", err, "userID", userID)
-			return c.Edit("Ошибка при бане пользователя.")
-		}
-
-		// Notify the banned user
-		banMessage := "Вы были забанены за нарушение правил использования бота. Вы больше не сможете отправлять или получать пожелания."
-		_, err = bot.api.Send(tele.ChatID(userID), banMessage)
-		if err != nil {
-			bot.log.Errorw("failed to send ban notification to user", "error", err, "userID", userID)
-		}
-
-		return c.Edit(fmt.Sprintf("Пользователь %d забанен и уведомлен.", userID))
-	case btnSkipBan:
-		return c.Edit(fmt.Sprintf("Бан пользователя %d пропущен.", userID))
-	default:
-		return c.Edit("Неизвестное действие.")
 	}
 }
 

@@ -1,0 +1,67 @@
+package wakey
+
+import (
+	"fmt"
+	"strconv"
+	"strings"
+
+	"go.uber.org/zap"
+	tele "gopkg.in/telebot.v3"
+)
+
+type AdminHandler struct {
+	db  *DB
+	api BotAPI
+	adm int64
+	log *zap.SugaredLogger
+}
+
+func NewAdminHandler(db *DB, log *zap.SugaredLogger) *AdminHandler {
+	return &AdminHandler{
+		db:  db,
+		log: log,
+	}
+}
+
+func (h *AdminHandler) HandleBanCallback(c tele.Context) error {
+	if c.Sender().ID != h.adm {
+		return nil
+	}
+
+	data := strings.Split(c.Data(), ":")
+	action := data[0]
+	userIDStr := data[1]
+
+	userID, err := strconv.ParseInt(userIDStr, 10, 64)
+	if err != nil {
+		return c.Edit("Ошибка при обработке ID пользователя.")
+	}
+
+	user, err := h.db.GetUser(userID)
+	if err != nil {
+		h.log.Errorw("failed to get user", "error", err, "userID", userID)
+		return c.Edit("Ошибка при получении информации о пользователе.")
+	}
+
+	switch action {
+	case btnBanUser:
+		user.IsBanned = true
+		if err := h.db.SaveUser(user); err != nil {
+			h.log.Errorw("failed to ban user", "error", err, "userID", userID)
+			return c.Edit("Ошибка при бане пользователя.")
+		}
+
+		// Notify the banned user
+		banMessage := "Вы были забанены за нарушение правил использования бота. Вы больше не сможете отправлять или получать пожелания."
+		_, err = h.api.Send(tele.ChatID(userID), banMessage)
+		if err != nil {
+			h.log.Errorw("failed to send ban notification to user", "error", err, "userID", userID)
+		}
+
+		return c.Edit(fmt.Sprintf("Пользователь %d забанен и уведомлен.", userID))
+	case btnSkipBan:
+		return c.Edit(fmt.Sprintf("Бан пользователя %d пропущен.", userID))
+	default:
+		return c.Edit("Неизвестное действие.")
+	}
+}
