@@ -16,8 +16,8 @@ type Bot struct {
 	api          BotAPI
 	db           *DB
 	wishSched    Scheduler
-	planSched    Scheduler
 	stateManager *StateManager
+	planHandler  *PlanHandler
 	adm          int64
 	log          *zap.SugaredLogger
 }
@@ -30,7 +30,7 @@ type BotAPI interface {
 	Stop()
 }
 
-type JobID uint
+type JobID int64
 type JobFunc func(JobID)
 
 type Scheduler interface {
@@ -64,13 +64,19 @@ func NewBot(db *DB, wishSched, planSched Scheduler) (*Bot, bool) {
 	bot := &Bot{
 		db:           db,
 		wishSched:    wishSched,
-		planSched:    planSched,
 		stateManager: NewStateManager(),
 		log:          zap.L().Named("bot").Sugar(),
 	}
 
+	bot.planHandler = &PlanHandler{
+		db:        db,
+		stateMan:  bot.stateManager,
+		planSched: planSched,
+		log:       bot.log,
+	}
+	planSched.SetJobFunc(bot.planHandler.AskAboutPlans)
+
 	bot.wishSched.SetJobFunc(bot.SendWish)
-	bot.planSched.SetJobFunc(bot.AskAboutPlans)
 
 	return bot, true
 }
@@ -78,6 +84,7 @@ func NewBot(db *DB, wishSched, planSched Scheduler) (*Bot, bool) {
 func (bot *Bot) Start(cfg Config, api BotAPI) {
 	bot.adm = cfg.AdminID
 	bot.api = api
+	bot.planHandler.api = api
 
 	bot.api.Use(middleware.Recover())
 	bot.api.Use(bot.logCmd)
@@ -85,8 +92,8 @@ func (bot *Bot) Start(cfg Config, api BotAPI) {
 
 	bot.api.Handle(tele.OnCallback, bot.handleCallback)
 	bot.api.Handle("/start", bot.handleStart)
-	bot.api.Handle("/set_plans", bot.handleSetPlans)
-	bot.api.Handle("/show_plan", bot.handleShowPlan)
+	bot.api.Handle("/set_plans", bot.planHandler.HandleSetPlans)
+	bot.api.Handle("/show_plan", bot.planHandler.HandleShowPlan)
 	bot.api.Handle(tele.OnText, bot.handleText)
 
 	// Load and schedule future wishes
@@ -206,7 +213,7 @@ func (bot *Bot) handleCallback(c tele.Context) error {
 	case btnWishDislike:
 		return bot.handleWishDislike(c)
 	case btnKeepPlans, btnUpdatePlans, btnNoWish:
-		return bot.handlePlanReminderCallback(c)
+		return bot.planHandler.HandlePlanReminderCallback(c)
 	case btnBanUser, btnSkipBan:
 		return bot.handleBanCallback(c)
 	case btnShowProfile:
@@ -352,13 +359,6 @@ func (bot *Bot) getWelcomeMessage() string {
 Надеюсь, мы отлично проведем время вместе!`
 }
 
-func (bot *Bot) handleSetPlans(c tele.Context) error {
-	userID := c.Sender().ID
-
-	bot.stateManager.SetState(userID, StateAwaitingPlans)
-	return c.Send("Пожалуйста, расскажите о ваших планах на завтра.")
-}
-
 func (bot *Bot) handleText(c tele.Context) error {
 	userID := c.Sender().ID
 
@@ -375,13 +375,13 @@ func (bot *Bot) handleText(c tele.Context) error {
 	case StateAwaitingTime:
 		return bot.handleTimeInput(c)
 	case StateAwaitingPlans:
-		return bot.handlePlansInput(c)
+		return bot.planHandler.HandlePlansInput(c)
 	case StateAwaitingWakeTime:
-		return bot.handleWakeTimeInput(c)
+		return bot.planHandler.HandleWakeTimeInput(c)
 	case StateAwaitingWish:
 		return bot.handleWishInput(c)
 	case StateAwaitingNotificationTime:
-		return bot.handleNotificationTimeInput(c)
+		return bot.planHandler.HandleNotificationTimeInput(c)
 	case StateUpdatingName:
 		return bot.handleNameUpdate(c)
 	case StateUpdatingBio:
@@ -389,11 +389,11 @@ func (bot *Bot) handleText(c tele.Context) error {
 	case StateUpdatingTimezone:
 		return bot.handleTimezoneUpdate(c)
 	case StateUpdatingPlans:
-		return bot.handlePlansUpdate(c)
+		return bot.planHandler.HandlePlansUpdate(c)
 	case StateUpdatingWakeTime:
-		return bot.handleWakeTimeUpdate(c)
+		return bot.planHandler.HandleWakeTimeUpdate(c)
 	case StateUpdatingNotificationTime:
-		return bot.handleNotificationTimeUpdate(c)
+		return bot.planHandler.HandleNotificationTimeUpdate(c)
 	default:
 		return nil
 	}
@@ -443,7 +443,7 @@ func (bot *Bot) handleBioInput(c tele.Context) error {
 	return c.Send("Отлично! Наконец, скажите, который сейчас у вас час? (Пожалуйста, используйте формат ЧЧ:ММ)")
 }
 
-func (bot *Bot) parseTime(timeStr string, userTz int32) (time.Time, error) {
+func parseTime(timeStr string, userTz int32) (time.Time, error) {
 	// Parse the time
 	t, err := time.Parse("15:04", timeStr)
 	if err != nil {
@@ -470,7 +470,7 @@ func (bot *Bot) handleTimeInput(c tele.Context) error {
 	userID := c.Sender().ID
 	timeStr := c.Text()
 
-	userTime, err := bot.parseTime(timeStr, 0) // Use 0 as initial timezone offset
+	userTime, err := parseTime(timeStr, 0) // Use 0 as initial timezone offset
 	if err != nil {
 		return c.Send(err.Error())
 	}
@@ -495,63 +495,6 @@ func (bot *Bot) handleTimeInput(c tele.Context) error {
 	// Registration complete
 	bot.stateManager.SetState(userID, StateAwaitingPlans)
 	return c.Send("Отлично! Теперь расскажите о ваших планах на завтра.")
-}
-
-func (bot *Bot) handlePlansInput(c tele.Context) error {
-	userID := c.Sender().ID
-	userData, _ := bot.stateManager.GetUserData(userID)
-	userData.Plans = c.Text()
-	bot.stateManager.SetUserData(userID, userData)
-	bot.stateManager.SetState(userID, StateAwaitingWakeTime)
-	return c.Send("Отлично! Теперь скажите, во сколько вы планируете проснуться завтра? (Используйте формат ЧЧ:ММ)")
-}
-
-func (bot *Bot) handleWakeTimeInput(c tele.Context) error {
-	userID := c.Sender().ID
-	wakeTimeStr := c.Text()
-
-	// Load user to get timezone
-	user, err := bot.db.GetUser(userID)
-	if err != nil {
-		bot.log.Errorw("failed to load user", "error", err)
-		return c.Send("Извините, произошла ошибка. Пожалуйста, попробуйте позже.")
-	}
-
-	utcWakeTime, err := bot.parseTime(wakeTimeStr, user.Tz)
-	if err != nil {
-		return c.Send(err.Error())
-	}
-
-	userData, _ := bot.stateManager.GetUserData(userID)
-
-	// Save plan to database
-	plan := &Plan{
-		UserID:  userID,
-		Content: userData.Plans,
-		WakeAt:  utcWakeTime,
-	}
-
-	if err := bot.db.SavePlan(plan); err != nil {
-		bot.log.Errorw("failed to save plan", "error", err)
-		return c.Send("Извините, произошла ошибка при сохранении вашей информации. Пожалуйста, попробуйте позже.")
-	}
-
-	bot.stateManager.ClearState(userID)
-
-	err = c.Send("Спасибо! Ваши планы и время пробуждения сохранены.")
-	if err != nil {
-		return err
-	}
-
-	// Ask if the user wants to send a wish
-	inlineKeyboard := &tele.ReplyMarkup{}
-	btnYes := inlineKeyboard.Data("Да", btnSendWishYes)
-	btnNo := inlineKeyboard.Data("Нет", btnSendWishNo)
-	inlineKeyboard.Inline(
-		inlineKeyboard.Row(btnYes, btnNo),
-	)
-
-	return c.Send("Хотите отправить пожелание другому пользователю?", inlineKeyboard)
 }
 
 func (bot *Bot) handleWishLike(c tele.Context, wish *Wish) error {
@@ -696,33 +639,6 @@ func (bot *Bot) findUserForWish(c tele.Context) error {
 	return c.Send(fmt.Sprintf("Отправьте ваше пожелание для этого пользователя:\n\n%s", userInfo))
 }
 
-func (bot *Bot) handleShowPlan(c tele.Context) error {
-	userID := c.Sender().ID
-
-	user, err := bot.db.GetUser(userID)
-	if err != nil {
-		bot.log.Errorw("failed to load user", "error", err)
-		return c.Send("Извините, произошла ошибка. Пожалуйста, попробуйте позже.")
-	}
-
-	plan, err := bot.db.GetLatestPlan(c.Sender().ID)
-	if err != nil {
-		if err == ErrNotFound {
-			return c.Send("У вас пока нет сохраненных планов.")
-		}
-		bot.log.Errorw("failed to get latest plan", "error", err)
-		return c.Send("Извините, произошла ошибка при получении ваших планов.")
-	}
-
-	userLoc := time.FixedZone("User Timezone", int(user.Tz)*60)
-	localWakeTime := plan.WakeAt.In(userLoc)
-
-	message := fmt.Sprintf("Ваши текущие планы:\n\nПлан: %s\nВремя пробуждения: %s",
-		plan.Content, localWakeTime.Format("15:04"))
-
-	return c.Send(message)
-}
-
 func (bot *Bot) handleWishInput(c tele.Context) error {
 	userID := c.Sender().ID
 	userData, _ := bot.stateManager.GetUserData(userID)
@@ -813,104 +729,6 @@ func (bot *Bot) scheduleFutureWishes() {
 	bot.log.Infof("Scheduled %d future wishes", len(wishes))
 }
 
-func (bot *Bot) handleNotificationTimeInput(c tele.Context) error {
-	userID := c.Sender().ID
-	notificationTimeStr := c.Text()
-
-	user, err := bot.db.GetUser(userID)
-	if err != nil {
-		bot.log.Errorw("failed to load user", "error", err, "userID", userID)
-		return c.Send("Извините, произошла ошибка. Пожалуйста, попробуйте позже.")
-	}
-
-	notifyAtUTC, err := bot.parseTime(notificationTimeStr, user.Tz)
-	if err != nil {
-		return c.Send(err.Error())
-	}
-	user.NotifyAt = notifyAtUTC
-
-	// Save user to database
-	if err := bot.db.SaveUser(user); err != nil {
-		bot.log.Errorw("failed to save user", "error", err)
-		return c.Send("Извините, произошла ошибка при сохранении вашей информации. Пожалуйста, попробуйте позже.")
-	}
-
-	// Schedule asking about plans
-	bot.schedulePlanReminder(user)
-
-	// Registration complete
-	bot.stateManager.ClearState(userID)
-	return c.Send(fmt.Sprintf("Отлично! Регистрация завершена. Я буду напоминать вам о планах каждый день в %s.", notificationTimeStr))
-}
-
-func (bot *Bot) schedulePlanReminder(user *User) {
-	now := time.Now().UTC()
-	nextNotification := user.NotifyAt
-
-	if nextNotification.Before(now) {
-		nextNotification = nextNotification.Add(24 * time.Hour)
-	}
-
-	bot.planSched.Schedule(nextNotification, JobID(user.ID))
-}
-
-func (bot *Bot) AskAboutPlans(id JobID) {
-	userID := int64(id)
-	user, err := bot.db.GetUser(userID)
-	if err != nil {
-		bot.log.Errorw("failed to load user", "error", err, "userID", userID)
-		return
-	}
-
-	// Create inline keyboard
-	inlineKeyboard := &tele.ReplyMarkup{}
-	btnKeep := inlineKeyboard.Data("Оставить как есть", btnKeepPlans)
-	btnUpdate := inlineKeyboard.Data("Обновить планы", btnUpdatePlans)
-	btnNoWish := inlineKeyboard.Data("Не получать пожелание", btnNoWish)
-	inlineKeyboard.Inline(
-		inlineKeyboard.Row(btnKeep),
-		inlineKeyboard.Row(btnUpdate),
-		inlineKeyboard.Row(btnNoWish),
-	)
-
-	_, err = bot.api.Send(tele.ChatID(userID), "Пора рассказать о ваших планах на завтра! Что вы хотите сделать?", inlineKeyboard)
-	if err != nil {
-		bot.log.Errorw("failed to send plan reminder", "error", err, "userID", userID)
-	}
-
-	// Reschedule for the next day
-	bot.schedulePlanReminder(user)
-}
-
-func (bot *Bot) handlePlanReminderCallback(c tele.Context) error {
-	action := c.Data()
-	userID := c.Sender().ID
-
-	switch action {
-	case btnKeepPlans:
-		// Keep plans and wake up time the same
-		err := bot.db.CopyPlanForNextDay(userID)
-		if err != nil {
-			bot.log.Errorw("failed to copy plan for next day", "error", err, "userID", userID)
-			return c.Edit("Произошла ошибка при сохранении ваших планов. Пожалуйста, попробуйте позже.")
-		}
-		bot.stateManager.ClearState(userID)
-		return c.Edit("Хорошо, ваши планы и время пробуждения остаются без изменений.")
-
-	case btnUpdatePlans:
-		// Update plans
-		bot.stateManager.SetState(userID, StateAwaitingPlans)
-		return c.Edit("Пожалуйста, расскажите о ваших новых планах на завтра.")
-
-	case btnNoWish:
-		bot.stateManager.ClearState(userID)
-		return c.Edit("Хорошо, вы не получите пожелание завтра.")
-
-	default:
-		return c.Edit("Неизвестный выбор. Пожалуйста, попробуйте еще раз.")
-	}
-}
-
 func (bot *Bot) handleNameUpdate(c tele.Context) error {
 	userID := c.Sender().ID
 	newName := c.Text()
@@ -955,7 +773,7 @@ func (bot *Bot) handleTimezoneUpdate(c tele.Context) error {
 	userID := c.Sender().ID
 	timeStr := c.Text()
 
-	userTime, err := bot.parseTime(timeStr, 0) // Use 0 as initial timezone offset
+	userTime, err := parseTime(timeStr, 0) // Use 0 as initial timezone offset
 	if err != nil {
 		return c.Send(err.Error())
 	}
@@ -975,83 +793,4 @@ func (bot *Bot) handleTimezoneUpdate(c tele.Context) error {
 
 	bot.stateManager.ClearState(userID)
 	return c.Send("Ваш часовой пояс успешно обновлен.")
-}
-
-func (bot *Bot) handlePlansUpdate(c tele.Context) error {
-	userID := c.Sender().ID
-	newPlans := c.Text()
-
-	plan, err := bot.db.GetLatestPlan(userID)
-	if err != nil {
-		bot.log.Errorw("failed to get latest plan", "error", err)
-		return c.Send("Извините, произошла ошибка. Пожалуйста, попробуйте позже.")
-	}
-
-	plan.Content = newPlans
-	if err := bot.db.SavePlan(plan); err != nil {
-		bot.log.Errorw("failed to save plan", "error", err)
-		return c.Send("Извините, произошла ошибка при сохранении ваших планов. Пожалуйста, попробуйте позже.")
-	}
-
-	bot.stateManager.ClearState(userID)
-	return c.Send("Ваши планы успешно обновлены.")
-}
-
-func (bot *Bot) handleWakeTimeUpdate(c tele.Context) error {
-	userID := c.Sender().ID
-	wakeTimeStr := c.Text()
-
-	user, err := bot.db.GetUser(userID)
-	if err != nil {
-		bot.log.Errorw("failed to load user", "error", err)
-		return c.Send("Извините, произошла ошибка. Пожалуйста, попробуйте позже.")
-	}
-
-	utcWakeTime, err := bot.parseTime(wakeTimeStr, user.Tz)
-	if err != nil {
-		return c.Send(err.Error())
-	}
-
-	plan, err := bot.db.GetLatestPlan(userID)
-	if err != nil {
-		bot.log.Errorw("failed to get latest plan", "error", err)
-		return c.Send("Извините, произошла ошибка. Пожалуйста, попробуйте позже.")
-	}
-
-	plan.WakeAt = utcWakeTime
-	if err := bot.db.SavePlan(plan); err != nil {
-		bot.log.Errorw("failed to save plan", "error", err)
-		return c.Send("Извините, произошла ошибка при сохранении вашего времени пробуждения. Пожалуйста, попробуйте позже.")
-	}
-
-	bot.stateManager.ClearState(userID)
-	return c.Send(fmt.Sprintf("Ваше время пробуждения успешно обновлено на %s.", wakeTimeStr))
-}
-
-func (bot *Bot) handleNotificationTimeUpdate(c tele.Context) error {
-	userID := c.Sender().ID
-	notificationTimeStr := c.Text()
-
-	user, err := bot.db.GetUser(userID)
-	if err != nil {
-		bot.log.Errorw("failed to load user", "error", err)
-		return c.Send("Извините, произошла ошибка. Пожалуйста, попробуйте позже.")
-	}
-
-	notifyAtUTC, err := bot.parseTime(notificationTimeStr, user.Tz)
-	if err != nil {
-		return c.Send(err.Error())
-	}
-	user.NotifyAt = notifyAtUTC
-
-	if err := bot.db.SaveUser(user); err != nil {
-		bot.log.Errorw("failed to save user", "error", err)
-		return c.Send("Извините, произошла ошибка при сохранении вашей информации. Пожалуйста, попробуйте позже.")
-	}
-
-	// Reschedule plan reminder
-	bot.schedulePlanReminder(user)
-
-	bot.stateManager.ClearState(userID)
-	return c.Send(fmt.Sprintf("Ваше время уведомления успешно обновлено на %s.", notificationTimeStr))
 }
