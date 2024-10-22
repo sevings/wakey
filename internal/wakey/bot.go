@@ -86,7 +86,8 @@ func NewBot(db *DB, wishSched, planSched Scheduler) (*Bot, bool) {
 	wishHandler := NewWishHandler(db, wishSched, bot.stateManager, bot.log)
 	profileHandler := NewProfileHandler(db, bot.stateManager, bot.log)
 	adminHandler := NewAdminHandler(db, bot.log)
-	bot.handlers = []BotHandler{planHandler, wishHandler, profileHandler, adminHandler}
+	generalHandler := NewGeneralHandler(db, bot.log)
+	bot.handlers = []BotHandler{planHandler, wishHandler, profileHandler, adminHandler, generalHandler}
 
 	for _, handler := range bot.handlers {
 		for _, action := range handler.Actions() {
