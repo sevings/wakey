@@ -23,6 +23,70 @@ func NewProfileHandler(db *DB, stateMan *StateManager, log *zap.SugaredLogger) *
 	}
 }
 
+func (ph *ProfileHandler) Actions() []string {
+	return []string{
+		btnShowProfile,
+		btnChangeName,
+		btnChangeBio,
+		btnChangeTimezone,
+	}
+}
+
+func (ph *ProfileHandler) HandleAction(c tele.Context, action string) error {
+	userID := c.Sender().ID
+
+	switch action {
+	case btnShowProfile:
+		return ph.HandleShowProfile(c)
+	case btnChangeName:
+		ph.stateMan.SetState(userID, StateUpdatingName)
+		return c.Edit("Пожалуйста, введите ваше новое имя.")
+	case btnChangeBio:
+		ph.stateMan.SetState(userID, StateUpdatingBio)
+		return c.Edit("Пожалуйста, введите ваше новое био.")
+	case btnChangeTimezone:
+		ph.stateMan.SetState(userID, StateUpdatingTimezone)
+		return c.Edit("Пожалуйста, введите текущее время в формате ЧЧ:ММ.")
+	default:
+		ph.log.Errorw("unexpected action for ProfileHandler", "action", action)
+		return c.Edit("Неизвестное действие. Пожалуйста, попробуйте еще раз.")
+	}
+}
+
+func (ph *ProfileHandler) States() []UserState {
+	return []UserState{
+		StateRegistrationStart,
+		StateAwaitingName,
+		StateAwaitingBio,
+		StateAwaitingTime,
+		StateUpdatingName,
+		StateUpdatingBio,
+		StateUpdatingTimezone,
+	}
+}
+
+func (ph *ProfileHandler) HandleState(c tele.Context, state UserState) error {
+	switch state {
+	case StateRegistrationStart:
+		return ph.HandleStart(c)
+	case StateAwaitingName:
+		return ph.HandleNameInput(c)
+	case StateUpdatingName:
+		return ph.HandleNameUpdate(c)
+	case StateAwaitingBio:
+		return ph.HandleBioInput(c)
+	case StateUpdatingBio:
+		return ph.HandleBioUpdate(c)
+	case StateAwaitingTime:
+		return ph.HandleTimeInput(c)
+	case StateUpdatingTimezone:
+		return ph.HandleTimezoneUpdate(c)
+	default:
+		ph.log.Errorw("unexpected state for ProfileHandler", "state", state)
+		return c.Edit("Неизвестное действие. Пожалуйста, попробуйте еще раз.")
+	}
+}
+
 func (ph *ProfileHandler) HandleStart(c tele.Context) error {
 	const welcomeMessage = `Я бот, который поможет вам планировать ваш день и обмениваться пожеланиями с другими пользователями. Вот что я умею:
 
@@ -30,10 +94,6 @@ func (ph *ProfileHandler) HandleStart(c tele.Context) error {
 2. Напоминать вам о необходимости обновить планы каждый вечер.
 3. Позволять вам отправлять пожелания другим пользователям.
 4. Доставлять пожелания от других пользователей в момент вашего пробуждения.
-
-Вот несколько команд, которые вам пригодятся:
-• /set_plans - обновить ваши планы и время пробуждения
-• /show_plan - показать ваш текущий план
 
 Надеюсь, мы отлично проведем время вместе!`
 

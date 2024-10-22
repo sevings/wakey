@@ -29,6 +29,85 @@ func NewPlanHandler(db *DB, planSched Scheduler, stateMan *StateManager, log *za
 	return ph
 }
 
+func (ph *PlanHandler) SetAPI(api BotAPI) {
+	ph.api = api
+}
+
+func (ph *PlanHandler) Actions() []string {
+	return []string{
+		btnChangePlans,
+		btnChangeWakeTime,
+		btnChangeNotifyTime,
+		btnKeepPlans,
+		btnUpdatePlans,
+		btnNoWish,
+	}
+}
+
+func (ph *PlanHandler) HandleAction(c tele.Context, action string) error {
+	userID := c.Sender().ID
+
+	switch action {
+	case btnChangePlans:
+		ph.stateMan.SetState(userID, StateUpdatingPlans)
+		return c.Edit("Пожалуйста, введите ваши новые планы на завтра.")
+	case btnChangeWakeTime:
+		ph.stateMan.SetState(userID, StateUpdatingWakeTime)
+		return c.Edit("Пожалуйста, введите новое время пробуждения в формате ЧЧ:ММ.")
+	case btnChangeNotifyTime:
+		ph.stateMan.SetState(userID, StateUpdatingNotificationTime)
+		return c.Edit("Пожалуйста, введите новое время уведомления в формате ЧЧ:ММ.")
+	case btnKeepPlans:
+		err := ph.db.CopyPlanForNextDay(userID)
+		if err != nil {
+			ph.log.Errorw("failed to copy plan for next day", "error", err, "userID", userID)
+			return c.Edit("Произошла ошибка при сохранении ваших планов. Пожалуйста, попробуйте позже.")
+		}
+		ph.stateMan.ClearState(userID)
+		return c.Edit("Хорошо, ваши планы и время пробуждения остаются без изменений.")
+	case btnUpdatePlans:
+		ph.stateMan.SetState(userID, StateAwaitingPlans)
+		return c.Edit("Пожалуйста, расскажите о ваших новых планах на завтра.")
+	case btnNoWish:
+		ph.stateMan.ClearState(userID)
+		return c.Edit("Хорошо, вы не получите пожелание завтра.")
+	default:
+		ph.log.Errorw("unexpected action for PlanHandler", "action", action)
+		return c.Edit("Неизвестное действие. Пожалуйста, попробуйте еще раз.")
+	}
+}
+
+func (ph *PlanHandler) States() []UserState {
+	return []UserState{
+		StateAwaitingPlans,
+		StateAwaitingWakeTime,
+		StateAwaitingNotificationTime,
+		StateUpdatingPlans,
+		StateUpdatingWakeTime,
+		StateUpdatingNotificationTime,
+	}
+}
+
+func (ph *PlanHandler) HandleState(c tele.Context, state UserState) error {
+	switch state {
+	case StateAwaitingPlans:
+		return ph.HandlePlansInput(c)
+	case StateUpdatingPlans:
+		return ph.HandlePlansUpdate(c)
+	case StateAwaitingWakeTime:
+		return ph.HandleWakeTimeInput(c)
+	case StateUpdatingWakeTime:
+		return ph.HandleWakeTimeUpdate(c)
+	case StateAwaitingNotificationTime:
+		return ph.HandleNotificationTimeInput(c)
+	case StateUpdatingNotificationTime:
+		return ph.HandleNotificationTimeUpdate(c)
+	default:
+		ph.log.Errorw("unexpected state for PlanHandler", "state", state)
+		return c.Edit("Неизвестное действие. Пожалуйста, попробуйте еще раз.")
+	}
+}
+
 func (ph *PlanHandler) schedulePlanReminder(user *User) {
 	now := time.Now().UTC()
 	nextNotification := user.NotifyAt
@@ -38,12 +117,6 @@ func (ph *PlanHandler) schedulePlanReminder(user *User) {
 	}
 
 	ph.planSched.Schedule(nextNotification, JobID(user.ID))
-}
-
-func (ph *PlanHandler) HandleSetPlans(c tele.Context) error {
-	userID := c.Sender().ID
-	ph.stateMan.SetState(userID, StateAwaitingPlans)
-	return c.Send("Пожалуйста, расскажите о ваших планах на завтра.")
 }
 
 func (ph *PlanHandler) HandlePlansInput(c tele.Context) error {
@@ -101,62 +174,6 @@ func (ph *PlanHandler) HandleWakeTimeInput(c tele.Context) error {
 	)
 
 	return c.Send("Хотите отправить пожелание другому пользователю?", inlineKeyboard)
-}
-
-func (ph *PlanHandler) HandleShowPlan(c tele.Context) error {
-	userID := c.Sender().ID
-
-	user, err := ph.db.GetUser(userID)
-	if err != nil {
-		ph.log.Errorw("failed to load user", "error", err)
-		return c.Send("Извините, произошла ошибка. Пожалуйста, попробуйте позже.")
-	}
-
-	plan, err := ph.db.GetLatestPlan(c.Sender().ID)
-	if err != nil {
-		if err == ErrNotFound {
-			return c.Send("У вас пока нет сохраненных планов.")
-		}
-		ph.log.Errorw("failed to get latest plan", "error", err)
-		return c.Send("Извините, произошла ошибка при получении ваших планов.")
-	}
-
-	userLoc := time.FixedZone("User Timezone", int(user.Tz)*60)
-	localWakeTime := plan.WakeAt.In(userLoc)
-
-	message := fmt.Sprintf("Ваши текущие планы:\n\nПлан: %s\nВремя пробуждения: %s",
-		plan.Content, localWakeTime.Format("15:04"))
-
-	return c.Send(message)
-}
-
-func (ph *PlanHandler) HandlePlanReminderCallback(c tele.Context) error {
-	action := c.Data()
-	userID := c.Sender().ID
-
-	switch action {
-	case btnKeepPlans:
-		// Keep plans and wake up time the same
-		err := ph.db.CopyPlanForNextDay(userID)
-		if err != nil {
-			ph.log.Errorw("failed to copy plan for next day", "error", err, "userID", userID)
-			return c.Edit("Произошла ошибка при сохранении ваших планов. Пожалуйста, попробуйте позже.")
-		}
-		ph.stateMan.ClearState(userID)
-		return c.Edit("Хорошо, ваши планы и время пробуждения остаются без изменений.")
-
-	case btnUpdatePlans:
-		// Update plans
-		ph.stateMan.SetState(userID, StateAwaitingPlans)
-		return c.Edit("Пожалуйста, расскажите о ваших новых планах на завтра.")
-
-	case btnNoWish:
-		ph.stateMan.ClearState(userID)
-		return c.Edit("Хорошо, вы не получите пожелание завтра.")
-
-	default:
-		return c.Edit("Неизвестный выбор. Пожалуйста, попробуйте еще раз.")
-	}
 }
 
 func (ph *PlanHandler) HandlePlansUpdate(c tele.Context) error {

@@ -23,13 +23,51 @@ func NewAdminHandler(db *DB, log *zap.SugaredLogger) *AdminHandler {
 	}
 }
 
-func (h *AdminHandler) HandleBanCallback(c tele.Context) error {
-	if c.Sender().ID != h.adm {
+func (ah *AdminHandler) SetAPI(api BotAPI) {
+	ah.api = api
+}
+
+func (ah *AdminHandler) SetAdminID(adminID int64) {
+	ah.adm = adminID
+}
+
+func (ah *AdminHandler) Actions() []string {
+	return []string{
+		btnBanUser,
+		btnSkipBan,
+	}
+}
+
+func (ah *AdminHandler) HandleAction(c tele.Context, action string) error {
+	if c.Sender().ID != ah.adm {
 		return nil
 	}
 
+	if action != btnBanUser && action != btnSkipBan {
+		ah.log.Errorw("unexpected action for AdminHandler", "action", action)
+		return c.Edit("Неизвестное действие. Пожалуйста, попробуйте еще раз.")
+	}
+
+	return ah.HandleBanCallback(c)
+}
+
+func (ah *AdminHandler) States() []UserState {
+	return []UserState{
+		// Admin handler doesn't have any specific states,
+		// but we need to implement this method to satisfy the interface
+	}
+}
+
+func (ah *AdminHandler) HandleState(c tele.Context, state UserState) error {
+	// Admin handler doesn't handle any specific states,
+	// but we need to implement this method to satisfy the interface
+	ah.log.Errorw("unexpected state for AdminHandler", "state", state)
+	return c.Edit("Неизвестное действие. Пожалуйста, попробуйте еще раз.")
+}
+
+func (h *AdminHandler) HandleBanCallback(c tele.Context) error {
 	data := strings.Split(c.Data(), ":")
-	action := data[0]
+	action := strings.TrimSpace(data[0])
 	userIDStr := data[1]
 
 	userID, err := strconv.ParseInt(userIDStr, 10, 64)

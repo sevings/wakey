@@ -9,6 +9,7 @@ type UserState int
 
 const (
 	StateNone UserState = iota
+	StateRegistrationStart
 	StateAwaitingName
 	StateAwaitingBio
 	StateAwaitingTime

@@ -2,7 +2,6 @@ package wakey
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -15,11 +14,9 @@ type Bot struct {
 	api            BotAPI
 	db             *DB
 	stateManager   *StateManager
-	planHandler    *PlanHandler
-	wishHandler    *WishHandler
-	profileHandler *ProfileHandler
-	adminHandler   *AdminHandler
-	adm            int64
+	handlers       []BotHandler
+	actionHandlers map[string]BotHandler
+	stateHandlers  map[UserState]BotHandler
 	log            *zap.SugaredLogger
 }
 
@@ -29,6 +26,21 @@ type BotAPI interface {
 	Use(middlewares ...tele.MiddlewareFunc)
 	Start()
 	Stop()
+}
+
+type BotHandler interface {
+	Actions() []string
+	HandleAction(c tele.Context, action string) error
+	States() []UserState
+	HandleState(c tele.Context, state UserState) error
+}
+
+type APISetter interface {
+	SetAPI(api BotAPI)
+}
+
+type AdminSetter interface {
+	SetAdminID(adminID int64)
 }
 
 type JobID int64
@@ -63,40 +75,53 @@ const (
 
 func NewBot(db *DB, wishSched, planSched Scheduler) (*Bot, bool) {
 	bot := &Bot{
-		db:           db,
-		stateManager: NewStateManager(),
-		log:          zap.L().Named("bot").Sugar(),
+		db:             db,
+		stateManager:   NewStateManager(),
+		log:            zap.L().Named("bot").Sugar(),
+		actionHandlers: make(map[string]BotHandler),
+		stateHandlers:  make(map[UserState]BotHandler),
 	}
 
-	bot.planHandler = NewPlanHandler(db, planSched, bot.stateManager, bot.log)
-	bot.wishHandler = NewWishHandler(db, wishSched, bot.stateManager, bot.log)
-	bot.profileHandler = NewProfileHandler(db, bot.stateManager, bot.log)
-	bot.adminHandler = NewAdminHandler(db, bot.log)
+	planHandler := NewPlanHandler(db, planSched, bot.stateManager, bot.log)
+	wishHandler := NewWishHandler(db, wishSched, bot.stateManager, bot.log)
+	profileHandler := NewProfileHandler(db, bot.stateManager, bot.log)
+	adminHandler := NewAdminHandler(db, bot.log)
+	bot.handlers = []BotHandler{planHandler, wishHandler, profileHandler, adminHandler}
+
+	for _, handler := range bot.handlers {
+		for _, action := range handler.Actions() {
+			bot.actionHandlers[action] = handler
+		}
+		for _, state := range handler.States() {
+			bot.stateHandlers[state] = handler
+		}
+	}
 
 	return bot, true
 }
 
 func (bot *Bot) Start(cfg Config, api BotAPI) {
-	bot.adm = cfg.AdminID
 	bot.api = api
-	bot.planHandler.api = api
-	bot.wishHandler.api = api
-	bot.wishHandler.adm = cfg.AdminID
-	bot.adminHandler.api = api
-	bot.adminHandler.adm = cfg.AdminID
+
+	for _, handler := range bot.handlers {
+		if apiSetter, ok := handler.(APISetter); ok {
+			apiSetter.SetAPI(api)
+		}
+	}
+
+	for _, handler := range bot.handlers {
+		if adminSetter, ok := handler.(AdminSetter); ok {
+			adminSetter.SetAdminID(cfg.AdminID)
+		}
+	}
 
 	bot.api.Use(middleware.Recover())
 	bot.api.Use(bot.logCmd)
 	bot.api.Use(bot.checkBan)
 
 	bot.api.Handle(tele.OnCallback, bot.handleCallback)
-	bot.api.Handle("/start", bot.profileHandler.HandleStart)
-	bot.api.Handle("/set_plans", bot.planHandler.HandleSetPlans)
-	bot.api.Handle("/show_plan", bot.planHandler.HandleShowPlan)
 	bot.api.Handle(tele.OnText, bot.handleText)
-
-	// Load and schedule future wishes
-	bot.wishHandler.ScheduleFutureWishes()
+	bot.api.Handle("/start", bot.handleStart)
 
 	// Start the state manager cleanup routine
 	cleanupInterval := time.Duration(cfg.MaxStateAge) / 10 * time.Hour
@@ -204,77 +229,13 @@ func (bot *Bot) handleCallback(c tele.Context) error {
 	data := strings.Split(c.Data(), ":")
 	action := strings.TrimSpace(data[0])
 
-	switch action {
-	case btnSendWishYes:
-		return bot.wishHandler.HandleSendWishResponse(c)
-	case btnSendWishNo:
-		return bot.wishHandler.HandleSendWishNo(c)
-	case btnWishDislike:
-		return bot.wishHandler.HandleWishDislike(c)
-	case btnKeepPlans, btnUpdatePlans, btnNoWish:
-		return bot.planHandler.HandlePlanReminderCallback(c)
-	case btnBanUser, btnSkipBan:
-		return bot.adminHandler.HandleBanCallback(c)
-	case btnShowProfile:
-		return bot.profileHandler.HandleShowProfile(c)
-	case btnChangeName, btnChangeBio, btnChangeTimezone, btnChangePlans, btnChangeWakeTime, btnChangeNotifyTime, btnDoNothing:
-		return bot.handleActionCallback(c)
+	handler, exists := bot.actionHandlers[action]
+	if !exists {
+		bot.log.Warnw("no handler for action", "action", action)
+		return c.Edit("Неизвестное действие. Пожалуйста, попробуйте еще раз.")
 	}
 
-	// For actions that require an ID
-	if len(data) != 2 {
-		return c.Send("Неверный формат данных.")
-	}
-
-	wishID, err := strconv.ParseUint(data[1], 10, 64)
-	if err != nil {
-		return c.Send("Неверный ID пожелания.")
-	}
-
-	wish, err := bot.db.GetWishByID(uint(wishID))
-	if err != nil {
-		return c.Send("Не удалось найти пожелание.")
-	}
-
-	switch action {
-	case btnWishLike:
-		return bot.wishHandler.HandleWishLike(c, wish)
-	case btnWishReport:
-		return bot.wishHandler.HandleWishReport(c, wish)
-	default:
-		return c.Send("Неизвестный выбор.")
-	}
-}
-
-func (bot *Bot) handleActionCallback(c tele.Context) error {
-	action := c.Data()
-	userID := c.Sender().ID
-
-	switch action {
-	case btnChangeName:
-		bot.stateManager.SetState(userID, StateUpdatingName)
-		return c.Edit("Пожалуйста, введите ваше новое имя.")
-	case btnChangeBio:
-		bot.stateManager.SetState(userID, StateUpdatingBio)
-		return c.Edit("Пожалуйста, введите ваше новое био.")
-	case btnChangeTimezone:
-		bot.stateManager.SetState(userID, StateUpdatingTimezone)
-		return c.Edit("Пожалуйста, введите текущее время в формате ЧЧ:ММ.")
-	case btnChangePlans:
-		bot.stateManager.SetState(userID, StateUpdatingPlans)
-		return c.Edit("Пожалуйста, введите ваши новые планы на завтра.")
-	case btnChangeWakeTime:
-		bot.stateManager.SetState(userID, StateUpdatingWakeTime)
-		return c.Edit("Пожалуйста, введите новое время пробуждения в формате ЧЧ:ММ.")
-	case btnChangeNotifyTime:
-		bot.stateManager.SetState(userID, StateUpdatingNotificationTime)
-		return c.Edit("Пожалуйста, введите новое время уведомления в формате ЧЧ:ММ.")
-	case btnDoNothing:
-		bot.stateManager.ClearState(userID)
-		return c.Edit("Хорошо, до свидания! Если вам что-то понадобится, просто напишите мне.")
-	default:
-		return c.Edit("Неизвестный выбор. Пожалуйста, попробуйте еще раз.")
-	}
+	return handler.HandleAction(c, action)
 }
 
 func (bot *Bot) handleText(c tele.Context) error {
@@ -285,36 +246,13 @@ func (bot *Bot) handleText(c tele.Context) error {
 		return bot.suggestActions(c)
 	}
 
-	switch state {
-	case StateAwaitingName:
-		return bot.profileHandler.HandleNameInput(c)
-	case StateAwaitingBio:
-		return bot.profileHandler.HandleBioInput(c)
-	case StateAwaitingTime:
-		return bot.profileHandler.HandleTimeInput(c)
-	case StateAwaitingPlans:
-		return bot.planHandler.HandlePlansInput(c)
-	case StateAwaitingWakeTime:
-		return bot.planHandler.HandleWakeTimeInput(c)
-	case StateAwaitingWish:
-		return bot.wishHandler.HandleWishInput(c)
-	case StateAwaitingNotificationTime:
-		return bot.planHandler.HandleNotificationTimeInput(c)
-	case StateUpdatingName:
-		return bot.profileHandler.HandleNameUpdate(c)
-	case StateUpdatingBio:
-		return bot.profileHandler.HandleBioUpdate(c)
-	case StateUpdatingTimezone:
-		return bot.profileHandler.HandleTimezoneUpdate(c)
-	case StateUpdatingPlans:
-		return bot.planHandler.HandlePlansUpdate(c)
-	case StateUpdatingWakeTime:
-		return bot.planHandler.HandleWakeTimeUpdate(c)
-	case StateUpdatingNotificationTime:
-		return bot.planHandler.HandleNotificationTimeUpdate(c)
-	default:
-		return nil
+	handler, exists := bot.stateHandlers[state]
+	if !exists {
+		bot.log.Warnw("no handler for state", "state", state)
+		return bot.suggestActions(c)
 	}
+
+	return handler.HandleState(c, state)
 }
 
 func (bot *Bot) suggestActions(c tele.Context) error {
@@ -341,6 +279,17 @@ func (bot *Bot) suggestActions(c tele.Context) error {
 	)
 
 	return c.Send("Похоже, вы не выполняете никаких действий. Что бы вы хотели сделать?", inlineKeyboard)
+}
+
+func (bot *Bot) handleStart(c tele.Context) error {
+	state := StateRegistrationStart
+	handler, exists := bot.stateHandlers[state]
+	if !exists {
+		bot.log.Warnw("no handler for state", "state", state)
+		return bot.suggestActions(c)
+	}
+
+	return handler.HandleState(c, state)
 }
 
 func parseTime(timeStr string, userTz int32) (time.Time, error) {

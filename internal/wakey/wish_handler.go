@@ -2,6 +2,8 @@ package wakey
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -26,8 +28,75 @@ func NewWishHandler(db *DB, wishSched Scheduler, stateMan *StateManager, log *za
 	}
 
 	wishSched.SetJobFunc(wh.SendWish)
+	wh.ScheduleFutureWishes()
 
 	return wh
+}
+
+func (wh *WishHandler) SetAPI(api BotAPI) {
+	wh.api = api
+}
+
+func (wh *WishHandler) SetAdminID(adminID int64) {
+	wh.adm = adminID
+}
+
+func (wh *WishHandler) Actions() []string {
+	return []string{
+		btnWishLike,
+		btnWishDislike,
+		btnWishReport,
+		btnSendWishYes,
+		btnSendWishNo,
+	}
+}
+
+func (wh *WishHandler) HandleAction(c tele.Context, action string) error {
+	switch action {
+	case btnSendWishYes:
+		return wh.HandleSendWishResponse(c)
+	case btnSendWishNo:
+		return wh.HandleSendWishNo(c)
+	case btnWishDislike:
+		return wh.HandleWishDislike(c)
+	case btnWishLike, btnWishReport:
+		data := strings.Split(c.Data(), ":")
+		if len(data) != 2 {
+			return c.Send("Неверный формат данных.")
+		}
+		wishID, err := strconv.ParseUint(data[1], 10, 64)
+		if err != nil {
+			return c.Send("Неверный ID пожелания.")
+		}
+		wish, err := wh.db.GetWishByID(uint(wishID))
+		if err != nil {
+			return c.Send("Не удалось найти пожелание.")
+		}
+		if action == btnWishLike {
+			return wh.HandleWishLike(c, wish)
+		} else {
+			return wh.HandleWishReport(c, wish)
+		}
+	default:
+		wh.log.Errorw("unexpected action for WishHandler", "action", action)
+		return c.Edit("Неизвестное действие. Пожалуйста, попробуйте еще раз.")
+	}
+}
+
+func (wh *WishHandler) States() []UserState {
+	return []UserState{
+		StateAwaitingWish,
+	}
+}
+
+func (wh *WishHandler) HandleState(c tele.Context, state UserState) error {
+	switch state {
+	case StateAwaitingWish:
+		return wh.HandleWishInput(c)
+	default:
+		wh.log.Errorw("unexpected state for WishHandler", "state", state)
+		return c.Edit("Неизвестное действие. Пожалуйста, попробуйте еще раз.")
+	}
 }
 
 func (wh *WishHandler) HandleWishLike(c tele.Context, wish *Wish) error {
