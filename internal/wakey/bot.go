@@ -433,20 +433,40 @@ func (bot *Bot) handleBioInput(c tele.Context) error {
 	return c.Send("Отлично! Наконец, скажите, который сейчас у вас час? (Пожалуйста, используйте формат ЧЧ:ММ)")
 }
 
+func (bot *Bot) parseTime(timeStr string, userTz int32) (time.Time, error) {
+	// Parse the time
+	t, err := time.Parse("15:04", timeStr)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("неверный формат времени. Пожалуйста, используйте формат ЧЧ:ММ (например, 14:30)")
+	}
+
+	// Create a time.Location using the user's timezone offset
+	userLoc := time.FixedZone("User Timezone", int(userTz)*60)
+
+	// Set the time to today in the user's timezone
+	now := time.Now().In(userLoc)
+	userTime := time.Date(now.Year(), now.Month(), now.Day(), t.Hour(), t.Minute(), 0, 0, userLoc)
+
+	// If the resulting time is in the past, assume it's for tomorrow
+	if userTime.Before(now) {
+		userTime = userTime.Add(24 * time.Hour)
+	}
+
+	// Convert to UTC
+	return userTime.UTC(), nil
+}
+
 func (bot *Bot) handleTimeInput(c tele.Context) error {
 	userID := c.Sender().ID
 	timeStr := c.Text()
 
-	// Parse the time
-	t, err := time.Parse("15:04", timeStr)
+	userTime, err := bot.parseTime(timeStr, 0) // Use 0 as initial timezone offset
 	if err != nil {
-		return c.Send("Извините, я не смог понять это время. Пожалуйста, попробуйте еще раз, используя формат ЧЧ:ММ (например, 14:30)")
+		return c.Send(err.Error())
 	}
 
 	// Calculate timezone offset
-	now := time.Now().UTC()
-	userTime := time.Date(now.Year(), now.Month(), now.Day(), t.Hour(), t.Minute(), 0, 0, time.UTC)
-	tzOffset := int32(userTime.Sub(now).Minutes())
+	tzOffset := int32(userTime.Sub(time.Now().UTC()).Minutes())
 
 	userData, _ := bot.stateManager.GetUserData(userID)
 
@@ -487,21 +507,10 @@ func (bot *Bot) handleWakeTimeInput(c tele.Context) error {
 		return c.Send("Извините, произошла ошибка. Пожалуйста, попробуйте позже.")
 	}
 
-	// Parse the time
-	localWakeTime, err := time.Parse("15:04", wakeTimeStr)
+	utcWakeTime, err := bot.parseTime(wakeTimeStr, user.Tz)
 	if err != nil {
-		return c.Send("Извините, я не смог понять это время. Пожалуйста, попробуйте еще раз, используя формат ЧЧ:ММ (например, 07:30)")
+		return c.Send(err.Error())
 	}
-
-	// Create a time.Location using the user's timezone offset
-	userLoc := time.FixedZone("User Timezone", int(user.Tz)*60)
-
-	// Set the wake time to tomorrow in the user's timezone
-	now := time.Now().In(userLoc)
-	localWakeTime = time.Date(now.Year(), now.Month(), now.Day()+1, localWakeTime.Hour(), localWakeTime.Minute(), 0, 0, userLoc)
-
-	// Convert local wake time to UTC
-	utcWakeTime := localWakeTime.UTC()
 
 	userData, _ := bot.stateManager.GetUserData(userID)
 
@@ -629,11 +638,6 @@ func (bot *Bot) findUserForWish(c tele.Context) error {
 	return c.Send(fmt.Sprintf("Отправьте ваше пожелание для этого пользователя:\n\n%s", userInfo))
 }
 
-func utcToUserLocal(utcTime time.Time, tzOffset int32) time.Time {
-	userLoc := time.FixedZone("User Timezone", int(tzOffset)*60)
-	return utcTime.In(userLoc)
-}
-
 func (bot *Bot) handleShowPlan(c tele.Context) error {
 	userID := c.Sender().ID
 
@@ -652,7 +656,8 @@ func (bot *Bot) handleShowPlan(c tele.Context) error {
 		return c.Send("Извините, произошла ошибка при получении ваших планов.")
 	}
 
-	localWakeTime := utcToUserLocal(plan.WakeAt, user.Tz)
+	userLoc := time.FixedZone("User Timezone", int(user.Tz)*60)
+	localWakeTime := plan.WakeAt.In(userLoc)
 
 	message := fmt.Sprintf("Ваши текущие планы:\n\nПлан: %s\nВремя пробуждения: %s",
 		plan.Content, localWakeTime.Format("15:04"))
@@ -754,26 +759,19 @@ func (bot *Bot) handleNotificationTimeInput(c tele.Context) error {
 	userID := c.Sender().ID
 	notificationTimeStr := c.Text()
 
-	// Parse the time
-	notificationTime, err := time.Parse("15:04", notificationTimeStr)
-	if err != nil {
-		return c.Send("Извините, я не смог понять это время. Пожалуйста, попробуйте еще раз, используя формат ЧЧ:ММ (например, 21:00)")
-	}
-
 	user, err := bot.db.GetUser(userID)
 	if err != nil {
 		bot.log.Errorw("failed to load user", "error", err, "userID", userID)
 		return c.Send("Извините, произошла ошибка. Пожалуйста, попробуйте позже.")
 	}
 
-	// Convert to UTC
-	now := time.Now().UTC()
-	userLoc := time.FixedZone("User Timezone", int(user.Tz)*60)
-	notifyAtUTC := time.Date(now.Year(), now.Month(), now.Day(), notificationTime.Hour(), notificationTime.Minute(), 0, 0, userLoc).UTC()
-
+	notifyAtUTC, err := bot.parseTime(notificationTimeStr, user.Tz)
+	if err != nil {
+		return c.Send(err.Error())
+	}
 	user.NotifyAt = notifyAtUTC
-	// Save user to database
 
+	// Save user to database
 	if err := bot.db.SaveUser(user); err != nil {
 		bot.log.Errorw("failed to save user", "error", err)
 		return c.Send("Извините, произошла ошибка при сохранении вашей информации. Пожалуйста, попробуйте позже.")
@@ -899,16 +897,11 @@ func (bot *Bot) handleTimezoneUpdate(c tele.Context) error {
 	userID := c.Sender().ID
 	timeStr := c.Text()
 
-	// Parse the time
-	t, err := time.Parse("15:04", timeStr)
+	userTime, err := bot.parseTime(timeStr, 0) // Use 0 as initial timezone offset
 	if err != nil {
-		return c.Send("Извините, я не смог понять это время. Пожалуйста, попробуйте еще раз, используя формат ЧЧ:ММ (например, 14:30)")
+		return c.Send(err.Error())
 	}
-
-	// Calculate timezone offset
-	now := time.Now().UTC()
-	userTime := time.Date(now.Year(), now.Month(), now.Day(), t.Hour(), t.Minute(), 0, 0, time.UTC)
-	tzOffset := int32(userTime.Sub(now).Minutes())
+	tzOffset := int32(userTime.Sub(time.Now().UTC()).Minutes())
 
 	user, err := bot.db.GetUser(userID)
 	if err != nil {
@@ -956,21 +949,10 @@ func (bot *Bot) handleWakeTimeUpdate(c tele.Context) error {
 		return c.Send("Извините, произошла ошибка. Пожалуйста, попробуйте позже.")
 	}
 
-	// Parse the time
-	localWakeTime, err := time.Parse("15:04", wakeTimeStr)
+	utcWakeTime, err := bot.parseTime(wakeTimeStr, user.Tz)
 	if err != nil {
-		return c.Send("Извините, я не смог понять это время. Пожалуйста, попробуйте еще раз, используя формат ЧЧ:ММ (например, 07:30)")
+		return c.Send(err.Error())
 	}
-
-	// Create a time.Location using the user's timezone offset
-	userLoc := time.FixedZone("User Timezone", int(user.Tz)*60)
-
-	// Set the wake time to tomorrow in the user's timezone
-	now := time.Now().In(userLoc)
-	localWakeTime = time.Date(now.Year(), now.Month(), now.Day()+1, localWakeTime.Hour(), localWakeTime.Minute(), 0, 0, userLoc)
-
-	// Convert local wake time to UTC
-	utcWakeTime := localWakeTime.UTC()
 
 	plan, err := bot.db.GetLatestPlan(userID)
 	if err != nil {
@@ -998,18 +980,12 @@ func (bot *Bot) handleNotificationTimeUpdate(c tele.Context) error {
 		return c.Send("Извините, произошла ошибка. Пожалуйста, попробуйте позже.")
 	}
 
-	// Parse the time
-	notificationTime, err := time.Parse("15:04", notificationTimeStr)
+	notifyAtUTC, err := bot.parseTime(notificationTimeStr, user.Tz)
 	if err != nil {
-		return c.Send("Извините, я не смог понять это время. Пожалуйста, попробуйте еще раз, используя формат ЧЧ:ММ (например, 21:00)")
+		return c.Send(err.Error())
 	}
-
-	// Convert to UTC
-	now := time.Now().UTC()
-	userLoc := time.FixedZone("User Timezone", int(user.Tz)*60)
-	notifyAtUTC := time.Date(now.Year(), now.Month(), now.Day(), notificationTime.Hour(), notificationTime.Minute(), 0, 0, userLoc).UTC()
-
 	user.NotifyAt = notifyAtUTC
+
 	if err := bot.db.SaveUser(user); err != nil {
 		bot.log.Errorw("failed to save user", "error", err)
 		return c.Send("Извините, произошла ошибка при сохранении вашей информации. Пожалуйста, попробуйте позже.")
