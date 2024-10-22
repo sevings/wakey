@@ -1,0 +1,215 @@
+package wakey
+
+import (
+	"errors"
+	"fmt"
+	"time"
+
+	"go.uber.org/zap"
+	tele "gopkg.in/telebot.v3"
+)
+
+type ProfileHandler struct {
+	db       *DB
+	stateMan *StateManager
+	log      *zap.SugaredLogger
+}
+
+func NewProfileHandler(db *DB, stateMan *StateManager, log *zap.SugaredLogger) *ProfileHandler {
+	return &ProfileHandler{
+		db:       db,
+		stateMan: stateMan,
+		log:      log,
+	}
+}
+
+func (ph *ProfileHandler) HandleStart(c tele.Context) error {
+	const welcomeMessage = `Я бот, который поможет вам планировать ваш день и обмениваться пожеланиями с другими пользователями. Вот что я умею:
+
+1. Сохранять ваши ежедневные планы и время пробуждения.
+2. Напоминать вам о необходимости обновить планы каждый вечер.
+3. Позволять вам отправлять пожелания другим пользователям.
+4. Доставлять пожелания от других пользователей в момент вашего пробуждения.
+
+Вот несколько команд, которые вам пригодятся:
+• /set_plans - обновить ваши планы и время пробуждения
+• /show_plan - показать ваш текущий план
+
+Надеюсь, мы отлично проведем время вместе!`
+
+	userID := c.Sender().ID
+
+	// Check if user already exists
+	user, err := ph.db.GetUser(userID)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		ph.log.Errorw("failed to check user existence", "error", err)
+		return c.Send("Извините, произошла ошибка. Пожалуйста, попробуйте позже.")
+	}
+	if err != ErrNotFound {
+		welcomeBack := fmt.Sprintf("С возвращением, %s! Вы уже зарегистрированы.", user.Name)
+		fullMessage := welcomeBack + "\n\n" + welcomeMessage
+		return c.Send(fullMessage)
+	}
+
+	// Start registration process
+	ph.stateMan.SetState(userID, StateAwaitingName)
+	fullMessage := "Добро пожаловать! Давайте зарегистрируем вас. Но сначала, позвольте рассказать о моих возможностях.\n\n"
+	fullMessage += welcomeMessage
+	fullMessage += "\n\nТеперь давайте начнем регистрацию. Как вас зовут?"
+	return c.Send(fullMessage)
+}
+
+func (ph *ProfileHandler) HandleShowProfile(c tele.Context) error {
+	userID := c.Sender().ID
+
+	user, err := ph.db.GetUser(userID)
+	if err != nil {
+		ph.log.Errorw("failed to load user", "error", err)
+		return c.Edit("Извините, произошла ошибка при загрузке вашего профиля. Пожалуйста, попробуйте позже.")
+	}
+
+	plan, err := ph.db.GetLatestPlan(userID)
+	if err != nil && err != ErrNotFound {
+		ph.log.Errorw("failed to load latest plan", "error", err)
+		return c.Edit("Извините, произошла ошибка при загрузке ваших планов. Пожалуйста, попробуйте позже.")
+	}
+
+	userLoc := time.FixedZone("User Timezone", int(user.Tz)*60)
+	localWakeTime := "Не установлено"
+	localNotifyTime := user.NotifyAt.In(userLoc).Format("15:04")
+
+	if plan != nil {
+		localWakeTime = plan.WakeAt.In(userLoc).Format("15:04")
+	}
+
+	profileMsg := fmt.Sprintf("Ваш профиль:\n\n"+
+		"Имя: %s\n"+
+		"Био: %s\n"+
+		"Часовой пояс: UTC%+d\n"+
+		"Время пробуждения: %s\n"+
+		"Время уведомления: %s\n",
+		user.Name, user.Bio, user.Tz/60, localWakeTime, localNotifyTime)
+
+	if plan != nil {
+		profileMsg += fmt.Sprintf("Текущие планы: %s", plan.Content)
+	} else {
+		profileMsg += "Текущие планы: Не установлены"
+	}
+
+	return c.Edit(profileMsg)
+}
+
+func (ph *ProfileHandler) HandleNameInput(c tele.Context) error {
+	userID := c.Sender().ID
+	userData, _ := ph.stateMan.GetUserData(userID)
+	userData.Name = c.Text()
+	ph.stateMan.SetUserData(userID, userData)
+	ph.stateMan.SetState(userID, StateAwaitingBio)
+	return c.Send("Приятно познакомиться, " + userData.Name + "! Теперь, пожалуйста, расскажите немного о себе (краткое био).")
+}
+
+func (ph *ProfileHandler) HandleNameUpdate(c tele.Context) error {
+	userID := c.Sender().ID
+	newName := c.Text()
+
+	user, err := ph.db.GetUser(userID)
+	if err != nil {
+		ph.log.Errorw("failed to load user", "error", err)
+		return c.Send("Извините, произошла ошибка. Пожалуйста, попробуйте позже.")
+	}
+
+	user.Name = newName
+	if err := ph.db.SaveUser(user); err != nil {
+		ph.log.Errorw("failed to save user", "error", err)
+		return c.Send("Извините, произошла ошибка при сохранении вашей информации. Пожалуйста, попробуйте позже.")
+	}
+
+	ph.stateMan.ClearState(userID)
+	return c.Send(fmt.Sprintf("Ваше имя успешно обновлено на %s.", newName))
+}
+
+func (ph *ProfileHandler) HandleBioInput(c tele.Context) error {
+	userID := c.Sender().ID
+	userData, _ := ph.stateMan.GetUserData(userID)
+	userData.Bio = c.Text()
+	ph.stateMan.SetUserData(userID, userData)
+	ph.stateMan.SetState(userID, StateAwaitingTime)
+	return c.Send("Отлично! Наконец, скажите, который сейчас у вас час? (Пожалуйста, используйте формат ЧЧ:ММ)")
+}
+
+func (ph *ProfileHandler) HandleBioUpdate(c tele.Context) error {
+	userID := c.Sender().ID
+	newBio := c.Text()
+
+	user, err := ph.db.GetUser(userID)
+	if err != nil {
+		ph.log.Errorw("failed to load user", "error", err)
+		return c.Send("Извините, произошла ошибка. Пожалуйста, попробуйте позже.")
+	}
+
+	user.Bio = newBio
+	if err := ph.db.SaveUser(user); err != nil {
+		ph.log.Errorw("failed to save user", "error", err)
+		return c.Send("Извините, произошла ошибка при сохранении вашей информации. Пожалуйста, попробуйте позже.")
+	}
+
+	ph.stateMan.ClearState(userID)
+	return c.Send("Ваше био успешно обновлено.")
+}
+
+func (ph *ProfileHandler) HandleTimeInput(c tele.Context) error {
+	userID := c.Sender().ID
+	timeStr := c.Text()
+
+	userTime, err := parseTime(timeStr, 0) // Use 0 as initial timezone offset
+	if err != nil {
+		return c.Send(err.Error())
+	}
+
+	// Calculate timezone offset
+	tzOffset := int32(userTime.Sub(time.Now().UTC()).Minutes())
+
+	userData, _ := ph.stateMan.GetUserData(userID)
+
+	// Save user to database
+	user := User{
+		ID:   userID,
+		Name: userData.Name,
+		Bio:  userData.Bio,
+		Tz:   tzOffset,
+	}
+	if err := ph.db.SaveUser(&user); err != nil {
+		ph.log.Errorw("failed to save user", "error", err)
+		return c.Send("Извините, произошла ошибка при сохранении вашей информации. Пожалуйста, попробуйте позже.")
+	}
+
+	// Registration complete
+	ph.stateMan.SetState(userID, StateAwaitingPlans)
+	return c.Send("Отлично! Теперь расскажите о ваших планах на завтра.")
+}
+
+func (ph *ProfileHandler) HandleTimezoneUpdate(c tele.Context) error {
+	userID := c.Sender().ID
+	timeStr := c.Text()
+
+	userTime, err := parseTime(timeStr, 0) // Use 0 as initial timezone offset
+	if err != nil {
+		return c.Send(err.Error())
+	}
+	tzOffset := int32(userTime.Sub(time.Now().UTC()).Minutes())
+
+	user, err := ph.db.GetUser(userID)
+	if err != nil {
+		ph.log.Errorw("failed to load user", "error", err)
+		return c.Send("Извините, произошла ошибка. Пожалуйста, попробуйте позже.")
+	}
+
+	user.Tz = tzOffset
+	if err := ph.db.SaveUser(user); err != nil {
+		ph.log.Errorw("failed to save user", "error", err)
+		return c.Send("Извините, произошла ошибка при сохранении вашей информации. Пожалуйста, попробуйте позже.")
+	}
+
+	ph.stateMan.ClearState(userID)
+	return c.Send("Ваш часовой пояс успешно обновлен.")
+}
