@@ -208,6 +208,8 @@ func (bot *Bot) handleCallback(c tele.Context) error {
 		return bot.handlePlanReminderCallback(c)
 	case btnBanUser, btnSkipBan:
 		return bot.handleBanCallback(c)
+	case btnChangeName, btnChangeBio, btnChangeTimezone, btnChangePlans, btnChangeWakeTime, btnChangeNotifyTime, btnDoNothing:
+		return bot.handleActionCallback(c)
 	}
 
 	// For actions that require an ID
