@@ -106,6 +106,7 @@ func (ph *ProfileHandler) HandleStart(c tele.Context) error {
 		return c.Send("Извините, произошла ошибка. Пожалуйста, попробуйте позже.")
 	}
 	if err != ErrNotFound {
+		ph.stateMan.ClearState(userID)
 		welcomeBack := fmt.Sprintf("С возвращением, %s! Вы уже зарегистрированы.", user.Name)
 		fullMessage := welcomeBack + "\n\n" + welcomeMessage
 		return c.Send(fullMessage)
@@ -231,14 +232,14 @@ func (ph *ProfileHandler) HandleTimeInput(c tele.Context) error {
 
 	userData, _ := ph.stateMan.GetUserData(userID)
 
-	// Save user to database
+	// Create new user in database
 	user := User{
 		ID:   userID,
 		Name: userData.Name,
 		Bio:  userData.Bio,
 		Tz:   tzOffset,
 	}
-	if err := ph.db.SaveUser(&user); err != nil {
+	if err := ph.db.CreateUser(&user); err != nil {
 		ph.log.Errorw("failed to save user", "error", err)
 		return c.Send("Извините, произошла ошибка при сохранении вашей информации. Пожалуйста, попробуйте позже.")
 	}

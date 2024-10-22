@@ -18,14 +18,31 @@ func setupTestDB(t *testing.T) *wakey.DB {
 func TestUserOperations(t *testing.T) {
 	db := setupTestDB(t)
 
+	// Create a user
 	user := &wakey.User{
 		ID:   1,
 		Name: "Test User",
 		Bio:  "Test Bio",
 		Tz:   0,
 	}
+	err := db.CreateUser(user)
+	require.NoError(t, err)
 
-	err := db.SaveUser(user)
+	// Test attempting to create a user with an existing ID
+	duplicateUser := &wakey.User{
+		ID:   1,
+		Name: "Duplicate User",
+		Bio:  "Duplicate Bio",
+		Tz:   0,
+	}
+	err = db.CreateUser(duplicateUser)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "already exists")
+
+	// Test updating an existing user
+	user.Name = "Updated Name"
+	user.Bio = "Updated Bio"
+	err = db.SaveUser(user)
 	require.NoError(t, err)
 
 	fetchedUser, err := db.GetUser(1)
@@ -33,15 +50,33 @@ func TestUserOperations(t *testing.T) {
 	require.Equal(t, user.Name, fetchedUser.Name)
 	require.Equal(t, user.Bio, fetchedUser.Bio)
 
-	_, err = db.GetUser(999)
+	// Test saving a new user with SaveUser
+	newUser := &wakey.User{
+		ID:   999,
+		Name: "New User",
+		Bio:  "New Bio",
+		Tz:   0,
+	}
+	err = db.SaveUser(newUser)
+	require.NoError(t, err)
+
+	// Verify the new user was inserted
+	fetchedNewUser, err := db.GetUser(999)
+	require.NoError(t, err)
+	require.Equal(t, newUser.Name, fetchedNewUser.Name)
+	require.Equal(t, newUser.Bio, fetchedNewUser.Bio)
+
+	// Test getting a non-existent user
+	_, err = db.GetUser(1000)
 	require.Error(t, err)
+	require.Equal(t, wakey.ErrNotFound, err)
 }
 
 func TestPlanOperations(t *testing.T) {
 	db := setupTestDB(t)
 
 	user := &wakey.User{ID: 2, Name: "Plan User"}
-	err := db.SaveUser(user)
+	err := db.CreateUser(user)
 	require.NoError(t, err)
 
 	plan := &wakey.Plan{
@@ -65,7 +100,7 @@ func TestCopyPlanForNextDay(t *testing.T) {
 	db := setupTestDB(t)
 
 	user := &wakey.User{ID: 3, Name: "Copy Plan User"}
-	err := db.SaveUser(user)
+	err := db.CreateUser(user)
 	require.NoError(t, err)
 
 	originalPlan := &wakey.Plan{
@@ -93,7 +128,7 @@ func TestWishOperations(t *testing.T) {
 	db := setupTestDB(t)
 
 	user := &wakey.User{ID: 4, Name: "Wish User"}
-	err := db.SaveUser(user)
+	err := db.CreateUser(user)
 	require.NoError(t, err)
 
 	plan := &wakey.Plan{
@@ -130,9 +165,9 @@ func TestFindUserForWish(t *testing.T) {
 
 	user1 := &wakey.User{ID: 6, Name: "Wish User 1"}
 	user2 := &wakey.User{ID: 7, Name: "Wish User 2"}
-	err := db.SaveUser(user1)
+	err := db.CreateUser(user1)
 	require.NoError(t, err)
-	err = db.SaveUser(user2)
+	err = db.CreateUser(user2)
 	require.NoError(t, err)
 
 	// Test finding a plan when none are available

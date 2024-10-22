@@ -2,6 +2,7 @@ package wakey
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/glebarez/sqlite"
@@ -65,8 +66,23 @@ func LoadDatabase(path string) (*DB, bool) {
 	}, true
 }
 
+func (db *DB) CreateUser(user *User) error {
+	result := db.db.Create(user)
+	if result.Error != nil {
+		if strings.Contains(result.Error.Error(), "UNIQUE constraint failed") {
+			return fmt.Errorf("user with ID %d already exists", user.ID)
+		}
+		return result.Error
+	}
+	return nil
+}
+
 func (db *DB) SaveUser(user *User) error {
-	return db.db.Create(user).Error
+	result := db.db.Save(user)
+	if result.Error != nil {
+		return result.Error
+	}
+	return nil
 }
 
 func (db *DB) GetUser(userID int64) (*User, error) {

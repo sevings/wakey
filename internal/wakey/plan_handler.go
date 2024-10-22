@@ -182,11 +182,19 @@ func (ph *PlanHandler) HandlePlansUpdate(c tele.Context) error {
 
 	plan, err := ph.db.GetLatestPlan(userID)
 	if err != nil {
-		ph.log.Errorw("failed to get latest plan", "error", err)
-		return c.Send("Извините, произошла ошибка. Пожалуйста, попробуйте позже.")
+		if err == ErrNotFound {
+			// Create a new plan if no existing plan is found
+			plan = &Plan{
+				UserID: userID,
+				WakeAt: time.Now().UTC().Add(24 * time.Hour), // Set default wake time to 24 hours from now
+			}
+		} else {
+			ph.log.Errorw("failed to get latest plan", "error", err)
+			return c.Send("Извините, произошла ошибка. Пожалуйста, попробуйте позже.")
+		}
 	}
-
 	plan.Content = newPlans
+
 	if err := ph.db.SavePlan(plan); err != nil {
 		ph.log.Errorw("failed to save plan", "error", err)
 		return c.Send("Извините, произошла ошибка при сохранении ваших планов. Пожалуйста, попробуйте позже.")
@@ -213,11 +221,19 @@ func (ph *PlanHandler) HandleWakeTimeUpdate(c tele.Context) error {
 
 	plan, err := ph.db.GetLatestPlan(userID)
 	if err != nil {
-		ph.log.Errorw("failed to get latest plan", "error", err)
-		return c.Send("Извините, произошла ошибка. Пожалуйста, попробуйте позже.")
+		if err == ErrNotFound {
+			// Create a new plan if no existing plan is found
+			plan = &Plan{
+				UserID:  userID,
+				Content: "Планы не указаны", // Default content
+			}
+		} else {
+			ph.log.Errorw("failed to get latest plan", "error", err)
+			return c.Send("Извините, произошла ошибка. Пожалуйста, попробуйте позже.")
+		}
 	}
-
 	plan.WakeAt = utcWakeTime
+
 	if err := ph.db.SavePlan(plan); err != nil {
 		ph.log.Errorw("failed to save plan", "error", err)
 		return c.Send("Извините, произошла ошибка при сохранении вашего времени пробуждения. Пожалуйста, попробуйте позже.")
