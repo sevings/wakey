@@ -72,6 +72,45 @@ func TestUserOperations(t *testing.T) {
 	require.Equal(t, wakey.ErrNotFound, err)
 }
 
+func TestGetAllUsers(t *testing.T) {
+	db := setupTestDB(t)
+	emptyUsers, err := db.GetAllUsers()
+	require.NoError(t, err)
+	require.Empty(t, emptyUsers)
+
+	// Create multiple users
+	users := []*wakey.User{
+		{ID: 10, Name: "User 1", Bio: "Bio 1", Tz: 0},
+		{ID: 11, Name: "User 2", Bio: "Bio 2", Tz: 1},
+		{ID: 12, Name: "User 3", Bio: "Bio 3", Tz: 2},
+	}
+
+	for _, user := range users {
+		err := db.CreateUser(user)
+		require.NoError(t, err)
+	}
+
+	// Test GetAllUsers
+	fetchedUsers, err := db.GetAllUsers()
+	require.NoError(t, err)
+	require.Len(t, fetchedUsers, len(users))
+
+	// Verify that all created users are present in the fetched results
+	for _, createdUser := range users {
+		found := false
+		for _, fetchedUser := range fetchedUsers {
+			if fetchedUser.ID == createdUser.ID {
+				require.Equal(t, createdUser.Name, fetchedUser.Name)
+				require.Equal(t, createdUser.Bio, fetchedUser.Bio)
+				require.Equal(t, createdUser.Tz, fetchedUser.Tz)
+				found = true
+				break
+			}
+		}
+		require.True(t, found, "Created user with ID %d not found in fetched results", createdUser.ID)
+	}
+}
+
 func TestPlanOperations(t *testing.T) {
 	db := setupTestDB(t)
 

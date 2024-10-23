@@ -26,6 +26,7 @@ func NewPlanHandler(db *DB, planSched Scheduler, stateMan *StateManager, log *za
 	}
 
 	planSched.SetJobFunc(ph.AskAboutPlans)
+	ph.ScheduleAllNotifications()
 
 	return ph
 }
@@ -119,11 +120,12 @@ func (ph *PlanHandler) schedulePlanReminder(user *User) {
 	now := time.Now().UTC()
 	nextNotification := user.NotifyAt
 
-	if nextNotification.Before(now) {
+	for nextNotification.Before(now) {
 		nextNotification = nextNotification.Add(24 * time.Hour)
 	}
 
 	ph.planSched.Schedule(nextNotification, JobID(user.ID))
+	ph.log.Infow("scheduled notification", "userID", user.ID, "notifyAt", nextNotification)
 }
 
 func (ph *PlanHandler) HandlePlansInput(c tele.Context) error {
@@ -355,4 +357,22 @@ func (ph *PlanHandler) HandleNotificationTimeUpdate(c tele.Context) error {
 	}
 
 	return c.Send(fmt.Sprintf("Ваше время уведомления успешно обновлено на %s.", notificationTimeStr))
+}
+
+func (ph *PlanHandler) ScheduleAllNotifications() {
+	users, err := ph.db.GetAllUsers()
+	if err != nil {
+		ph.log.Errorw("failed to get all users", "error", err)
+		return
+	}
+
+	cnt := 0
+	for _, user := range users {
+		if !user.NotifyAt.IsZero() {
+			ph.schedulePlanReminder(user)
+			cnt++
+		}
+	}
+
+	ph.log.Infof("Scheduled notifications for %d users", cnt)
 }

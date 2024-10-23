@@ -97,6 +97,15 @@ func (db *DB) GetUser(userID int64) (*User, error) {
 	return &user, nil
 }
 
+func (db *DB) GetAllUsers() ([]*User, error) {
+	var users []*User
+	result := db.db.Find(&users)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	return users, nil
+}
+
 func (db *DB) SavePlan(plan *Plan) error {
 	plan.OfferedAt = time.Time{}
 	return db.db.Save(plan).Error
