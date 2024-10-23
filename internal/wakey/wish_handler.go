@@ -60,7 +60,7 @@ func (wh *WishHandler) HandleAction(c tele.Context, action string) error {
 	case btnWishDislike:
 		return wh.HandleWishDislike(c)
 	case btnWishLike, btnWishReport:
-		data := strings.Split(c.Data(), ":")
+		data := strings.Split(c.Data(), "|")
 		if len(data) != 2 {
 			return c.Send("Неверный формат данных.")
 		}

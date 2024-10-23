@@ -99,7 +99,7 @@ func (db *DB) GetUser(userID int64) (*User, error) {
 
 func (db *DB) SavePlan(plan *Plan) error {
 	plan.OfferedAt = time.Time{}
-	return db.db.Create(plan).Error
+	return db.db.Save(plan).Error
 }
 
 func (db *DB) GetLatestPlan(userID int64) (*Plan, error) {

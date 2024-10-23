@@ -234,7 +234,7 @@ func (bot *Bot) checkBan(next tele.HandlerFunc) tele.HandlerFunc {
 }
 
 func (bot *Bot) handleCallback(c tele.Context) error {
-	data := strings.Split(c.Data(), ":")
+	data := strings.Split(c.Data(), "|")
 	action := strings.TrimSpace(data[0])
 
 	handler, exists := bot.actionHandlers[action]
