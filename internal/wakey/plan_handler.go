@@ -164,10 +164,16 @@ func (ph *PlanHandler) HandleWakeTimeInput(c tele.Context) error {
 		ph.log.Errorw("failed to save plan", "error", err)
 		return c.Send("Извините, произошла ошибка при сохранении вашей информации. Пожалуйста, попробуйте позже.")
 	}
+	// Check if we're in the registration process
+	if userData.Name != "" {
+		// Ask for notification time
+		ph.stateMan.SetState(userID, StateAwaitingNotificationTime)
+		return c.Send("Отлично! Теперь укажите, в какое время вы хотели бы получать напоминание о планах на следующий день? (Используйте формат ЧЧ:ММ или отправьте 'отключить', чтобы отключить уведомления)")
+	}
 
-	// Ask for notification time
-	ph.stateMan.SetState(userID, StateAwaitingNotificationTime)
-	return c.Send("Отлично! Теперь укажите, в какое время вы хотели бы получать напоминание о планах на следующий день? (Используйте формат ЧЧ:ММ или отправьте 'отключить', чтобы отключить уведомления)")
+	// If not in registration, finish here
+	ph.stateMan.ClearState(userID)
+	return c.Send("Ваше время пробуждения успешно обновлено.")
 }
 
 func (ph *PlanHandler) HandlePlansUpdate(c tele.Context) error {

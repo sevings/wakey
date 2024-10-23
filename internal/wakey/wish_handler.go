@@ -181,7 +181,6 @@ func (wh *WishHandler) FindUserForWish(c tele.Context) error {
 	// Set user state and data
 	userData := &UserData{
 		State:        StateAwaitingWish,
-		TargetUserID: plan.User.ID,
 		TargetPlanID: plan.ID,
 	}
 	wh.stateMan.SetUserData(senderID, userData)

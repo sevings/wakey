@@ -26,14 +26,12 @@ const (
 )
 
 type UserData struct {
-	State          UserState
-	IsSingleAction bool
-	Name           string
-	Bio            string
-	Plans          string
-	TargetUserID   int64
-	TargetPlanID   uint
-	LastUpdated    time.Time
+	State        UserState
+	Name         string
+	Bio          string
+	Plans        string
+	TargetPlanID uint
+	LastUpdated  time.Time
 }
 
 type StateManager struct {

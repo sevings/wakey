@@ -137,7 +137,11 @@ func (ph *ProfileHandler) HandleShowProfile(c tele.Context) error {
 
 	userLoc := time.FixedZone("User Timezone", int(user.Tz)*60)
 	localWakeTime := "Не установлено"
-	localNotifyTime := user.NotifyAt.In(userLoc).Format("15:04")
+	localNotifyTime := "Отключено"
+
+	if !user.NotifyAt.IsZero() {
+		localNotifyTime = user.NotifyAt.In(userLoc).Format("15:04")
+	}
 
 	if plan != nil {
 		localWakeTime = plan.WakeAt.In(userLoc).Format("15:04")
