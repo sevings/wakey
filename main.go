@@ -44,10 +44,7 @@ func main() {
 	planSched.Start()
 	defer planSched.Stop()
 
-	bot, ok := wakey.NewBot(db, wishSched, planSched)
-	if !ok {
-		logger.Panic("can't create bot")
-	}
+	bot := wakey.NewBot(db)
 
 	pref := tele.Settings{
 		Token:   cfg.TgToken,
@@ -60,7 +57,7 @@ func main() {
 		logger.Panic(err)
 	}
 
-	bot.Start(cfg, api)
+	bot.Start(cfg, api, wishSched, planSched, api.Me.Username)
 	defer bot.Stop()
 
 	quit := make(chan os.Signal, 1)

@@ -68,12 +68,14 @@ const (
 	btnChangePlans      = "change_plans"
 	btnChangeWakeTime   = "change_wake_time"
 	btnChangeNotifyTime = "change_notify_time"
+	btnInviteFriends    = "invite_friends"
 	btnDoNothing        = "do_nothing"
+	btnShowLink         = "show_link"
 	btnBanUser          = "ban_user"
 	btnSkipBan          = "skip_ban"
 )
 
-func NewBot(db *DB, wishSched, planSched Scheduler) (*Bot, bool) {
+func NewBot(db *DB) *Bot {
 	bot := &Bot{
 		db:             db,
 		stateManager:   NewStateManager(),
@@ -82,11 +84,17 @@ func NewBot(db *DB, wishSched, planSched Scheduler) (*Bot, bool) {
 		stateHandlers:  make(map[UserState]BotHandler),
 	}
 
-	planHandler := NewPlanHandler(db, planSched, bot.stateManager, bot.log)
-	wishHandler := NewWishHandler(db, wishSched, bot.stateManager, bot.log)
-	profileHandler := NewProfileHandler(db, bot.stateManager, bot.log)
-	adminHandler := NewAdminHandler(db, bot.log)
-	generalHandler := NewGeneralHandler(db, bot.log)
+	return bot
+}
+
+func (bot *Bot) Start(cfg Config, api BotAPI, wishSched, planSched Scheduler, botName string) {
+	bot.api = api
+
+	planHandler := NewPlanHandler(bot.db, planSched, bot.stateManager, bot.log)
+	wishHandler := NewWishHandler(bot.db, wishSched, bot.stateManager, bot.log)
+	profileHandler := NewProfileHandler(bot.db, bot.stateManager, bot.log)
+	adminHandler := NewAdminHandler(bot.db, bot.log)
+	generalHandler := NewGeneralHandler(bot.db, bot.log, botName)
 	bot.handlers = []BotHandler{planHandler, wishHandler, profileHandler, adminHandler, generalHandler}
 
 	for _, handler := range bot.handlers {
@@ -97,12 +105,6 @@ func NewBot(db *DB, wishSched, planSched Scheduler) (*Bot, bool) {
 			bot.stateHandlers[state] = handler
 		}
 	}
-
-	return bot, true
-}
-
-func (bot *Bot) Start(cfg Config, api BotAPI) {
-	bot.api = api
 
 	for _, handler := range bot.handlers {
 		if apiSetter, ok := handler.(APISetter); ok {
@@ -266,6 +268,7 @@ func (bot *Bot) suggestActions(c tele.Context) error {
 	btnChangePlans := inlineKeyboard.Data("Изменить планы на завтра", btnChangePlans)
 	btnChangeWakeTime := inlineKeyboard.Data("Изменить время пробуждения", btnChangeWakeTime)
 	btnChangeNotifyTime := inlineKeyboard.Data("Изменить время уведомления", btnChangeNotifyTime)
+	btnInviteFriends := inlineKeyboard.Data("Пригласить друзей", "invite_friends")
 	btnDoNothing := inlineKeyboard.Data("Ничего, до свидания", btnDoNothing)
 
 	inlineKeyboard.Inline(
@@ -276,6 +279,7 @@ func (bot *Bot) suggestActions(c tele.Context) error {
 		inlineKeyboard.Row(btnChangePlans),
 		inlineKeyboard.Row(btnChangeWakeTime),
 		inlineKeyboard.Row(btnChangeNotifyTime),
+		inlineKeyboard.Row(btnInviteFriends),
 		inlineKeyboard.Row(btnDoNothing),
 	)
 
