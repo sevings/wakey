@@ -148,9 +148,12 @@ func (bot *Bot) logMessage(c tele.Context, beginTime int64, err error) {
 	duration := float64(endTime-beginTime) / 1000000
 
 	isCmd := len(c.Text()) > 0 && c.Text()[0] == '/' && len(c.Entities()) == 1
+	isAction := c.Callback() != nil
 	var cmd string
 	if isCmd {
 		cmd = c.Text()
+	} else if isAction {
+		cmd = strings.TrimSpace(strings.Split(c.Callback().Data, "|")[0])
 	}
 	bot.log.Infow("user message",
 		"chat_id", c.Chat().ID,
@@ -158,6 +161,7 @@ func (bot *Bot) logMessage(c tele.Context, beginTime int64, err error) {
 		"user_id", c.Sender().ID,
 		"user_name", c.Sender().Username,
 		"is_cmd", isCmd,
+		"is_action", isAction,
 		"cmd", cmd,
 		"size", len(c.Text()),
 		"dur", fmt.Sprintf("%.2f", duration),
@@ -168,10 +172,11 @@ func (bot *Bot) logCmd(next tele.HandlerFunc) tele.HandlerFunc {
 	return func(c tele.Context) error {
 		beginTime := time.Now().UnixNano()
 		isBotCmd := len(c.Text()) > 0 && c.Text()[0] == '/' && len(c.Entities()) == 1
+		isAction := c.Callback() != nil
 
 		err := next(c)
 
-		if isBotCmd {
+		if isBotCmd || isAction {
 			bot.logMessage(c, beginTime, err)
 		}
 
