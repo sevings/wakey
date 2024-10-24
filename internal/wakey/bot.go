@@ -90,7 +90,7 @@ func NewBot(db *DB) *Bot {
 func (bot *Bot) Start(cfg Config, api BotAPI, wishSched, planSched Scheduler, botName string) {
 	bot.api = api
 
-	planHandler := NewPlanHandler(bot.db, planSched, bot.stateManager, bot.log)
+	planHandler := NewPlanHandler(bot.db, planSched, wishSched, bot.stateManager, bot.log)
 	wishHandler := NewWishHandler(bot.db, wishSched, bot.stateManager, bot.log)
 	profileHandler := NewProfileHandler(bot.db, bot.stateManager, bot.log)
 	adminHandler := NewAdminHandler(bot.db, bot.log)
@@ -214,7 +214,7 @@ func (bot *Bot) checkBan(next tele.HandlerFunc) tele.HandlerFunc {
 		userID := c.Sender().ID
 
 		// Check if user exists and is banned
-		user, err := bot.db.GetUser(userID)
+		user, err := bot.db.GetUserByID(userID)
 		if err == nil && user.IsBanned {
 			const msg = "Извините, вы не можете использовать бота, так как были забанены."
 			// Check if it's a callback query

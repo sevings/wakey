@@ -14,14 +14,16 @@ type PlanHandler struct {
 	db        *DB
 	stateMan  *StateManager
 	planSched Scheduler
+	wishSched Scheduler
 	log       *zap.SugaredLogger
 }
 
-func NewPlanHandler(db *DB, planSched Scheduler, stateMan *StateManager, log *zap.SugaredLogger) *PlanHandler {
+func NewPlanHandler(db *DB, planSched, wishSched Scheduler, stateMan *StateManager, log *zap.SugaredLogger) *PlanHandler {
 	ph := &PlanHandler{
 		db:        db,
 		stateMan:  stateMan,
 		planSched: planSched,
+		wishSched: wishSched,
 		log:       log,
 	}
 
@@ -61,11 +63,12 @@ func (ph *PlanHandler) HandleAction(c tele.Context, action string) error {
 		return c.Edit("Пожалуйста, введите новое время уведомления в формате ЧЧ:ММ. " +
 			"Если вы хотите отключить уведомления, отправьте 'отключить'.")
 	case btnKeepPlans:
-		err := ph.db.CopyPlanForNextDay(userID)
+		plan, err := ph.db.CopyPlanForNextDay(userID)
 		if err != nil {
 			ph.log.Errorw("failed to copy plan for next day", "error", err, "userID", userID)
 			return c.Edit("Произошла ошибка при сохранении ваших планов. Пожалуйста, попробуйте позже.")
 		}
+		ph.scheduleWishSend(plan)
 		ph.stateMan.ClearState(userID)
 		return c.Edit("Хорошо, ваши планы и время пробуждения остаются без изменений.")
 	case btnUpdatePlans:
@@ -128,6 +131,11 @@ func (ph *PlanHandler) schedulePlanReminder(user *User) {
 	ph.log.Infow("scheduled notification", "userID", user.ID, "notifyAt", nextNotification)
 }
 
+func (ph *PlanHandler) scheduleWishSend(plan *Plan) {
+	ph.wishSched.Schedule(plan.WakeAt, JobID(plan.ID))
+	ph.log.Infow("scheduled wish", "planID", plan.ID, "wakeAt", plan.WakeAt)
+}
+
 func (ph *PlanHandler) HandlePlansInput(c tele.Context) error {
 	userID := c.Sender().ID
 	userData, _ := ph.stateMan.GetUserData(userID)
@@ -142,7 +150,7 @@ func (ph *PlanHandler) HandleWakeTimeInput(c tele.Context) error {
 	wakeTimeStr := c.Text()
 
 	// Load user to get timezone
-	user, err := ph.db.GetUser(userID)
+	user, err := ph.db.GetUserByID(userID)
 	if err != nil {
 		ph.log.Errorw("failed to load user", "error", err)
 		return c.Send("Извините, произошла ошибка. Пожалуйста, попробуйте позже.")
@@ -166,6 +174,8 @@ func (ph *PlanHandler) HandleWakeTimeInput(c tele.Context) error {
 		ph.log.Errorw("failed to save plan", "error", err)
 		return c.Send("Извините, произошла ошибка при сохранении вашей информации. Пожалуйста, попробуйте позже.")
 	}
+	ph.scheduleWishSend(plan)
+
 	// Check if we're in the registration process
 	if userData.Name != "" {
 		// Ask for notification time
@@ -215,7 +225,7 @@ func (ph *PlanHandler) HandleWakeTimeUpdate(c tele.Context) error {
 	userID := c.Sender().ID
 	wakeTimeStr := c.Text()
 
-	user, err := ph.db.GetUser(userID)
+	user, err := ph.db.GetUserByID(userID)
 	if err != nil {
 		ph.log.Errorw("failed to load user", "error", err)
 		return c.Send("Извините, произошла ошибка. Пожалуйста, попробуйте позже.")
@@ -247,12 +257,13 @@ func (ph *PlanHandler) HandleWakeTimeUpdate(c tele.Context) error {
 	}
 
 	ph.stateMan.ClearState(userID)
+	ph.wishSched.Schedule(plan.WakeAt, JobID(plan.ID))
 	return c.Send(fmt.Sprintf("Ваше время пробуждения успешно обновлено на %s.", wakeTimeStr))
 }
 
 func (ph *PlanHandler) AskAboutPlans(id JobID) {
 	userID := int64(id)
-	user, err := ph.db.GetUser(userID)
+	user, err := ph.db.GetUserByID(userID)
 	if err != nil {
 		ph.log.Errorw("failed to load user", "error", err, "userID", userID)
 		return
@@ -282,7 +293,7 @@ func (ph *PlanHandler) HandleNotificationTimeInput(c tele.Context) error {
 	userID := c.Sender().ID
 	notificationTimeStr := c.Text()
 
-	user, err := ph.db.GetUser(userID)
+	user, err := ph.db.GetUserByID(userID)
 	if err != nil {
 		ph.log.Errorw("failed to load user", "error", err, "userID", userID)
 		return c.Send("Извините, произошла ошибка. Пожалуйста, попробуйте позже.")
@@ -333,7 +344,7 @@ func (ph *PlanHandler) HandleNotificationTimeUpdate(c tele.Context) error {
 	userID := c.Sender().ID
 	notificationTimeStr := c.Text()
 
-	user, err := ph.db.GetUser(userID)
+	user, err := ph.db.GetUserByID(userID)
 	if err != nil {
 		ph.log.Errorw("failed to load user", "error", err)
 		return c.Send("Извините, произошла ошибка. Пожалуйста, попробуйте позже.")
@@ -373,11 +384,21 @@ func (ph *PlanHandler) ScheduleAllNotifications() {
 
 	cnt := 0
 	for _, user := range users {
-		if !user.NotifyAt.IsZero() {
+		if !user.IsBanned && !user.NotifyAt.IsZero() {
 			ph.schedulePlanReminder(user)
 			cnt++
 		}
 	}
 
 	ph.log.Infof("Scheduled notifications for %d users", cnt)
+
+	plans, err := ph.db.GetFuturePlans()
+	if err != nil {
+		ph.log.Errorw("failed to get future plans", "error", err)
+		return
+	}
+
+	for _, plan := range plans {
+		ph.scheduleWishSend(&plan)
+	}
 }

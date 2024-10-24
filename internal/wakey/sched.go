@@ -62,10 +62,10 @@ func (s *Sched) run() {
 		case <-s.done:
 			return
 		case id := <-s.jobCh:
-			s.fn(id)
 			s.mu.Lock()
 			delete(s.entries, id)
 			s.mu.Unlock()
+			s.fn(id)
 		}
 	}
 }

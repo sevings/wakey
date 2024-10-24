@@ -101,7 +101,7 @@ func (ph *ProfileHandler) HandleStart(c tele.Context) error {
 	userID := c.Sender().ID
 
 	// Check if user already exists
-	user, err := ph.db.GetUser(userID)
+	user, err := ph.db.GetUserByID(userID)
 	if err != nil && !errors.Is(err, ErrNotFound) {
 		ph.log.Errorw("failed to check user existence", "error", err)
 		return c.Send("Извините, произошла ошибка. Пожалуйста, попробуйте позже.")
@@ -124,7 +124,7 @@ func (ph *ProfileHandler) HandleStart(c tele.Context) error {
 func (ph *ProfileHandler) HandleShowProfile(c tele.Context) error {
 	userID := c.Sender().ID
 
-	user, err := ph.db.GetUser(userID)
+	user, err := ph.db.GetUserByID(userID)
 	if err != nil {
 		ph.log.Errorw("failed to load user", "error", err)
 		return c.Edit("Извините, произошла ошибка при загрузке вашего профиля. Пожалуйста, попробуйте позже.")
@@ -178,7 +178,7 @@ func (ph *ProfileHandler) HandleNameUpdate(c tele.Context) error {
 	userID := c.Sender().ID
 	newName := c.Text()
 
-	user, err := ph.db.GetUser(userID)
+	user, err := ph.db.GetUserByID(userID)
 	if err != nil {
 		ph.log.Errorw("failed to load user", "error", err)
 		return c.Send("Извините, произошла ошибка. Пожалуйста, попробуйте позже.")
@@ -207,7 +207,7 @@ func (ph *ProfileHandler) HandleBioUpdate(c tele.Context) error {
 	userID := c.Sender().ID
 	newBio := c.Text()
 
-	user, err := ph.db.GetUser(userID)
+	user, err := ph.db.GetUserByID(userID)
 	if err != nil {
 		ph.log.Errorw("failed to load user", "error", err)
 		return c.Send("Извините, произошла ошибка. Пожалуйста, попробуйте позже.")
@@ -271,7 +271,7 @@ func (ph *ProfileHandler) HandleTimezoneUpdate(c tele.Context) error {
 		return c.Send(err.Error())
 	}
 
-	user, err := ph.db.GetUser(userID)
+	user, err := ph.db.GetUserByID(userID)
 	if err != nil {
 		ph.log.Errorw("failed to load user", "error", err)
 		return c.Send("Извините, произошла ошибка. Пожалуйста, попробуйте позже.")

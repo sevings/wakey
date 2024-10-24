@@ -45,7 +45,7 @@ func TestUserOperations(t *testing.T) {
 	err = db.SaveUser(user)
 	require.NoError(t, err)
 
-	fetchedUser, err := db.GetUser(1)
+	fetchedUser, err := db.GetUserByID(1)
 	require.NoError(t, err)
 	require.Equal(t, user.Name, fetchedUser.Name)
 	require.Equal(t, user.Bio, fetchedUser.Bio)
@@ -61,13 +61,13 @@ func TestUserOperations(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify the new user was inserted
-	fetchedNewUser, err := db.GetUser(999)
+	fetchedNewUser, err := db.GetUserByID(999)
 	require.NoError(t, err)
 	require.Equal(t, newUser.Name, fetchedNewUser.Name)
 	require.Equal(t, newUser.Bio, fetchedNewUser.Bio)
 
 	// Test getting a non-existent user
-	_, err = db.GetUser(1000)
+	_, err = db.GetUserByID(1000)
 	require.Error(t, err)
 	require.Equal(t, wakey.ErrNotFound, err)
 }
@@ -142,25 +142,51 @@ func TestCopyPlanForNextDay(t *testing.T) {
 	err := db.CreateUser(user)
 	require.NoError(t, err)
 
-	originalPlan := &wakey.Plan{
+	// Create a past plan first
+	pastPlan := &wakey.Plan{
 		UserID:  3,
-		Content: "Original Plan",
-		WakeAt:  time.Now().Add(24 * time.Hour),
+		Content: "Past Plan",
+		WakeAt:  time.Now().Add(-24 * time.Hour),
 	}
-	err = db.SavePlan(originalPlan)
+	err = db.SavePlan(pastPlan)
 	require.NoError(t, err)
 
-	err = db.CopyPlanForNextDay(3)
+	// This should create a copy of the past plan
+	latestPlan, err := db.CopyPlanForNextDay(3)
+	require.NoError(t, err)
+	require.NotNil(t, latestPlan)
+	require.Equal(t, pastPlan.Content, latestPlan.Content)
+	require.True(t, latestPlan.WakeAt.After(time.Now()))
+
+	plans, err := db.GetAllPlansForUser(3)
+	require.NoError(t, err)
+	require.Len(t, plans, 2) // Should have two plans (past and new copy)
+
+	// Add a future plan
+	futurePlan := &wakey.Plan{
+		UserID:  3,
+		Content: "Future Plan",
+		WakeAt:  time.Now().Add(48 * time.Hour),
+	}
+	err = db.SavePlan(futurePlan)
 	require.NoError(t, err)
 
-	newPlan, err := db.GetLatestPlan(3)
+	// Trying to copy when there's a future plan should return that future plan
+	latestPlan, err = db.CopyPlanForNextDay(3)
 	require.NoError(t, err)
-	require.Equal(t, originalPlan.Content, newPlan.Content)
-	require.True(t, newPlan.WakeAt.After(originalPlan.WakeAt))
-	require.WithinDuration(t, originalPlan.WakeAt.Add(24*time.Hour), newPlan.WakeAt, time.Second)
+	require.NotNil(t, latestPlan)
+	require.Equal(t, futurePlan.Content, latestPlan.Content)
+	require.Equal(t, futurePlan.ID, latestPlan.ID)
 
-	err = db.CopyPlanForNextDay(999)
+	plans, err = db.GetAllPlansForUser(3)
+	require.NoError(t, err)
+	require.Len(t, plans, 3) // Should still have three plans (past, copy, and future)
+
+	// Test with non-existent user
+	latestPlan, err = db.CopyPlanForNextDay(999)
 	require.Error(t, err)
+	require.Equal(t, wakey.ErrNotFound, err)
+	require.Nil(t, latestPlan)
 }
 
 func TestWishOperations(t *testing.T) {
@@ -193,13 +219,49 @@ func TestWishOperations(t *testing.T) {
 
 	_, err = db.GetWishByID(999)
 	require.Error(t, err)
-
-	futureWishes, err := db.GetFutureWishes()
-	require.NoError(t, err)
-	require.GreaterOrEqual(t, len(futureWishes), 1)
 }
 
-func TestFindUserForWish(t *testing.T) {
+func TestGetWishesByPlanID(t *testing.T) {
+	db := setupTestDB(t)
+
+	// Create a user
+	user := &wakey.User{ID: 8, Name: "Wish Test User"}
+	err := db.CreateUser(user)
+	require.NoError(t, err)
+
+	// Create a plan
+	plan := &wakey.Plan{
+		UserID:  8,
+		Content: "Test Plan",
+		WakeAt:  time.Now().Add(24 * time.Hour),
+	}
+	err = db.SavePlan(plan)
+	require.NoError(t, err)
+
+	// Create multiple wishes for the plan
+	wishes := []*wakey.Wish{
+		{FromID: 9, PlanID: plan.ID, Content: "Wish 1"},
+		{FromID: 10, PlanID: plan.ID, Content: "Wish 2"},
+		{FromID: 11, PlanID: plan.ID, Content: "Wish 3"},
+	}
+
+	for _, wish := range wishes {
+		err := db.SaveWish(wish)
+		require.NoError(t, err)
+	}
+
+	// Test getting wishes for the plan
+	fetchedWishes, err := db.GetWishesByPlanID(plan.ID)
+	require.NoError(t, err)
+	require.Len(t, fetchedWishes, len(wishes))
+
+	// Test getting wishes for non-existent plan
+	nonExistentWishes, err := db.GetWishesByPlanID(999)
+	require.NoError(t, err)
+	require.Empty(t, nonExistentWishes)
+}
+
+func TestFindPlanForWish(t *testing.T) {
 	db := setupTestDB(t)
 
 	user1 := &wakey.User{ID: 6, Name: "Wish User 1"}
@@ -210,7 +272,7 @@ func TestFindUserForWish(t *testing.T) {
 	require.NoError(t, err)
 
 	// Test finding a plan when none are available
-	_, err = db.FindUserForWish(6)
+	_, err = db.FindPlanForWish(6)
 	require.Error(t, err)
 	require.Equal(t, wakey.ErrNotFound, err)
 
@@ -230,14 +292,14 @@ func TestFindUserForWish(t *testing.T) {
 	require.NoError(t, err)
 
 	// Test finding a plan for a wish
-	foundPlan, err := db.FindUserForWish(6)
+	foundPlan, err := db.FindPlanForWish(6)
 	require.NoError(t, err)
 	require.NotNil(t, foundPlan)
 	require.Equal(t, int64(7), foundPlan.UserID)
 
 	// Test with non-existent sender ID (should still find a plan)
 	nonExistentSenderID := int64(999)
-	foundPlan, err = db.FindUserForWish(nonExistentSenderID)
+	foundPlan, err = db.FindPlanForWish(nonExistentSenderID)
 	require.NoError(t, err)
 	require.NotNil(t, foundPlan)
 
@@ -259,7 +321,72 @@ func TestFindUserForWish(t *testing.T) {
 	require.NoError(t, err)
 
 	// Now try to find a plan when all have wishes (should return error)
-	_, err = db.FindUserForWish(6)
+	_, err = db.FindPlanForWish(6)
 	require.Error(t, err)
 	require.Equal(t, wakey.ErrNotFound, err)
+}
+
+func TestGetFuturePlans(t *testing.T) {
+	db := setupTestDB(t)
+
+	// Create users
+	users := []*wakey.User{
+		{ID: 20, Name: "Future Plan User 1"},
+		{ID: 21, Name: "Future Plan User 2"},
+	}
+	for _, user := range users {
+		err := db.CreateUser(user)
+		require.NoError(t, err)
+	}
+
+	now := time.Now()
+
+	// Create various plans
+	plans := []*wakey.Plan{
+		{
+			UserID:  20,
+			Content: "Past Plan 1",
+			WakeAt:  now.Add(-24 * time.Hour),
+		},
+		{
+			UserID:  20,
+			Content: "Future Plan 1",
+			WakeAt:  now.Add(24 * time.Hour),
+		},
+		{
+			UserID:  21,
+			Content: "Past Plan 2",
+			WakeAt:  now.Add(-48 * time.Hour),
+		},
+		{
+			UserID:  21,
+			Content: "Future Plan 2",
+			WakeAt:  now.Add(48 * time.Hour),
+		},
+	}
+
+	for _, plan := range plans {
+		err := db.SavePlan(plan)
+		require.NoError(t, err)
+	}
+
+	// Test GetFuturePlans
+	futurePlans, err := db.GetFuturePlans()
+	require.NoError(t, err)
+
+	// Should only get the future plans
+	require.Len(t, futurePlans, 2)
+
+	// Verify the returned plans are actually in the future
+	for _, plan := range futurePlans {
+		require.True(t, plan.WakeAt.After(now))
+	}
+
+	// Verify the content of future plans
+	futureContents := make(map[string]bool)
+	for _, plan := range futurePlans {
+		futureContents[plan.Content] = true
+	}
+	require.True(t, futureContents["Future Plan 1"])
+	require.True(t, futureContents["Future Plan 2"])
 }

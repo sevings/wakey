@@ -11,24 +11,21 @@ import (
 )
 
 type WishHandler struct {
-	db        *DB
-	api       BotAPI
-	wishSched Scheduler
-	stateMan  *StateManager
-	adm       int64
-	log       *zap.SugaredLogger
+	db       *DB
+	api      BotAPI
+	stateMan *StateManager
+	adm      int64
+	log      *zap.SugaredLogger
 }
 
 func NewWishHandler(db *DB, wishSched Scheduler, stateMan *StateManager, log *zap.SugaredLogger) *WishHandler {
 	wh := &WishHandler{
-		db:        db,
-		wishSched: wishSched,
-		stateMan:  stateMan,
-		log:       log,
+		db:       db,
+		stateMan: stateMan,
+		log:      log,
 	}
 
-	wishSched.SetJobFunc(wh.SendWish)
-	wh.ScheduleFutureWishes()
+	wishSched.SetJobFunc(wh.SendWishes)
 
 	return wh
 }
@@ -100,9 +97,21 @@ func (wh *WishHandler) HandleState(c tele.Context, state UserState) error {
 }
 
 func (wh *WishHandler) HandleWishLike(c tele.Context, wish *Wish) error {
+	plan, err := wh.db.GetPlanByID(wish.PlanID)
+	if err != nil {
+		wh.log.Errorw("failed to get plan", "error", err)
+		return c.Send("Извините, произошла ошибка. Пожалуйста, попробуйте позже.")
+	}
+
+	user, err := wh.db.GetUserByID(plan.UserID)
+	if err != nil {
+		wh.log.Errorw("failed to get user", "error", err, "userID", plan.UserID)
+		return c.Send("Извините, произошла ошибка. Пожалуйста, попробуйте позже.")
+	}
+
 	// Send message to the wish author
-	thanksMsg := fmt.Sprintf("Пользователю %s понравилось ваше пожелание.", wish.Plan.User.Name)
-	_, err := wh.api.Send(tele.ChatID(wish.FromID), thanksMsg)
+	thanksMsg := fmt.Sprintf("Пользователю %s понравилось ваше пожелание.", user.Name)
+	_, err = wh.api.Send(tele.ChatID(wish.FromID), thanksMsg)
 	if err != nil {
 		wh.log.Errorw("failed to send thanks message", "error", err, "userID", wish.FromID)
 	}
@@ -166,7 +175,7 @@ func (wh *WishHandler) HandleSendWishNo(c tele.Context) error {
 func (wh *WishHandler) FindUserForWish(c tele.Context) error {
 	senderID := c.Sender().ID
 
-	plan, err := wh.db.FindUserForWish(senderID)
+	plan, err := wh.db.FindPlanForWish(senderID)
 	if err != nil {
 		if err == ErrNotFound {
 			return c.Send("К сожалению, сейчас нет пользователей, которым можно отправить пожелание.")
@@ -175,8 +184,14 @@ func (wh *WishHandler) FindUserForWish(c tele.Context) error {
 		return c.Send("Извините, произошла ошибка. Пожалуйста, попробуйте позже.")
 	}
 
+	user, err := wh.db.GetUserByID(plan.UserID)
+	if err != nil {
+		wh.log.Errorw("failed to get user", "error", err, "userID", plan.UserID)
+		return c.Send("Извините, произошла ошибка. Пожалуйста, попробуйте позже.")
+	}
+
 	userInfo := fmt.Sprintf("Имя: %s\nО себе: %s\nПланы: %s",
-		plan.User.Name, plan.User.Bio, plan.Content)
+		user.Name, user.Bio, plan.Content)
 
 	// Set user state and data
 	userData := &UserData{
@@ -217,63 +232,61 @@ func (wh *WishHandler) HandleWishInput(c tele.Context) error {
 		return c.Send("Извините, произошла ошибка при сохранении вашего пожелания. Пожалуйста, попробуйте позже.")
 	}
 
-	wh.wishSched.Schedule(plan.WakeAt, JobID(wish.ID))
-
 	wh.stateMan.ClearState(userID)
 	return c.Send("Спасибо! Ваше пожелание отправлено и будет доставлено пользователю в запланированное время.")
 }
 
-func (wh *WishHandler) SendWish(id JobID) {
-	wishID := uint(id)
-	wish, err := wh.db.GetWishByID(wishID)
+func (wh *WishHandler) SendWishes(id JobID) {
+	planID := uint(id)
+	plan, err := wh.db.GetPlanByID(planID)
 	if err != nil {
-		wh.log.Errorw("failed to get wish", "error", err, "wishID", wishID)
+		wh.log.Errorw("failed to get plan", "error", err, "planID", planID)
 		return
 	}
 
 	// Check if the recipient is banned
-	recipient, err := wh.db.GetUser(wish.Plan.UserID)
+	recipient, err := wh.db.GetUserByID(plan.UserID)
 	if err != nil {
-		wh.log.Errorw("failed to get recipient", "error", err, "userID", wish.Plan.UserID)
+		wh.log.Errorw("failed to get recipient", "error", err, "userID", plan.UserID)
 		return
 	}
 
 	if recipient.IsBanned {
-		wh.log.Infow("skipping wish for banned user", "userID", wish.Plan.UserID)
+		wh.log.Infow("skipping wishes for banned user", "userID", plan.UserID)
 		return
 	}
 
-	message := fmt.Sprintf("Доброе утро! Вот пожелание для вас:\n\n%s", wish.Content)
-
-	// Create inline keyboard
-	inlineKeyboard := &tele.ReplyMarkup{}
-	btnLike := inlineKeyboard.Data("Спасибо, понравилось", btnWishLike, fmt.Sprintf("%d", wishID))
-	btnDislike := inlineKeyboard.Data("Ну такое…", btnWishDislike, fmt.Sprintf("%d", wishID))
-	btnReport := inlineKeyboard.Data("Пожаловаться", btnWishReport, fmt.Sprintf("%d", wishID))
-	inlineKeyboard.Inline(
-		inlineKeyboard.Row(btnLike),
-		inlineKeyboard.Row(btnDislike),
-		inlineKeyboard.Row(btnReport),
-	)
-
-	// Send message with inline keyboard
-	_, err = wh.api.Send(tele.ChatID(wish.Plan.UserID), message, inlineKeyboard)
+	// Get all wishes for this plan
+	wishes, err := wh.db.GetWishesByPlanID(planID)
 	if err != nil {
-		wh.log.Errorw("failed to send wish", "error", err, "userID", wish.Plan.UserID)
-	}
-}
-
-func (wh *WishHandler) ScheduleFutureWishes() {
-	wishes, err := wh.db.GetFutureWishes()
-	if err != nil {
-		wh.log.Errorw("failed to schedule future wishes", "error", err)
+		wh.log.Errorw("failed to get wishes", "error", err, "planID", planID)
 		return
 	}
 
+	if len(wishes) == 0 {
+		wh.log.Infow("no wishes found for plan", "planID", planID)
+		return
+	}
+
+	// Send each wish to the recipient
 	for _, wish := range wishes {
-		wh.wishSched.Schedule(wish.Plan.WakeAt, JobID(wish.ID))
-		wh.log.Infow("scheduled wish", "wishID", wish.ID, "wakeAt", wish.Plan.WakeAt)
-	}
+		message := fmt.Sprintf("Доброе утро! Вот пожелание для вас:\n\n%s", wish.Content)
 
-	wh.log.Infof("Scheduled %d future wishes", len(wishes))
+		// Create inline keyboard
+		inlineKeyboard := &tele.ReplyMarkup{}
+		btnLike := inlineKeyboard.Data("Спасибо, понравилось", btnWishLike, fmt.Sprintf("%d", wish.ID))
+		btnDislike := inlineKeyboard.Data("Ну такое…", btnWishDislike, fmt.Sprintf("%d", wish.ID))
+		btnReport := inlineKeyboard.Data("Пожаловаться", btnWishReport, fmt.Sprintf("%d", wish.ID))
+		inlineKeyboard.Inline(
+			inlineKeyboard.Row(btnLike),
+			inlineKeyboard.Row(btnDislike),
+			inlineKeyboard.Row(btnReport),
+		)
+
+		// Send message with inline keyboard
+		_, err = wh.api.Send(tele.ChatID(plan.UserID), message, inlineKeyboard)
+		if err != nil {
+			wh.log.Errorw("failed to send wish", "error", err, "userID", plan.UserID, "wishID", wish.ID)
+		}
+	}
 }

@@ -32,7 +32,6 @@ type User struct {
 type Plan struct {
 	gorm.Model
 	UserID    int64
-	User      User `gorm:"foreignKey:UserID"`
 	Content   string
 	WakeAt    time.Time
 	OfferedAt time.Time
@@ -42,7 +41,6 @@ type Wish struct {
 	gorm.Model
 	FromID  int64
 	PlanID  uint
-	Plan    Plan `gorm:"foreignKey:PlanID"`
 	Content string
 }
 
@@ -85,7 +83,7 @@ func (db *DB) SaveUser(user *User) error {
 	return nil
 }
 
-func (db *DB) GetUser(userID int64) (*User, error) {
+func (db *DB) GetUserByID(userID int64) (*User, error) {
 	var user User
 	result := db.db.Where("id = ?", userID).Limit(1).Find(&user)
 	if result.Error != nil {
@@ -128,30 +126,40 @@ func (db *DB) GetLatestPlan(userID int64) (*Plan, error) {
 	return &plan, nil
 }
 
-func (db *DB) CopyPlanForNextDay(userID int64) error {
+func (db *DB) CopyPlanForNextDay(userID int64) (*Plan, error) {
 	var latestPlan Plan
 	result := db.db.Where("user_id = ?", userID).
 		Order("wake_at DESC").
 		Limit(1).
 		Find(&latestPlan)
 	if result.Error != nil {
-		return result.Error
+		return nil, result.Error
 	}
 	if result.RowsAffected == 0 {
-		return ErrNotFound
+		return nil, ErrNotFound
 	}
 
-	if latestPlan.WakeAt.After(time.Now().UTC()) {
-		return nil
+	now := time.Now().UTC()
+	if latestPlan.WakeAt.After(now) {
+		return &latestPlan, nil
 	}
 
 	newPlan := Plan{
 		UserID:  userID,
 		Content: latestPlan.Content,
-		WakeAt:  latestPlan.WakeAt.Add(24 * time.Hour),
+		WakeAt:  latestPlan.WakeAt,
 	}
 
-	return db.db.Create(&newPlan).Error
+	for newPlan.WakeAt.Before(now) {
+		newPlan.WakeAt = newPlan.WakeAt.Add(24 * time.Hour)
+	}
+
+	err := db.db.Create(&newPlan).Error
+	if err != nil {
+		return nil, err
+	}
+
+	return &newPlan, nil
 }
 
 func (db *DB) GetPlanByID(planID uint) (*Plan, error) {
@@ -177,13 +185,12 @@ func (db *DB) GetAllPlansForUser(userID int64) ([]Plan, error) {
 	return plans, nil
 }
 
-func (db *DB) FindUserForWish(senderID int64) (*Plan, error) {
+func (db *DB) FindPlanForWish(senderID int64) (*Plan, error) {
 	var plan Plan
 	now := time.Now().UTC()
 	oneHourAgo := now.Add(-1 * time.Hour)
 
 	result := db.db.
-		Joins("User").
 		Joins("LEFT JOIN wishes ON plans.id = wishes.plan_id").
 		Where("plans.user_id != ?", senderID).
 		Where("plans.wake_at > ?", now).
@@ -214,8 +221,7 @@ func (db *DB) SaveWish(wish *Wish) error {
 func (db *DB) GetWishByID(wishID uint) (*Wish, error) {
 	var wish Wish
 	result := db.db.
-		Joins("Plan").
-		Where("id = ?", wishID).
+		Where("wishes.id = ?", wishID).
 		Limit(1).
 		Find(&wish)
 	if result.Error != nil {
@@ -227,15 +233,23 @@ func (db *DB) GetWishByID(wishID uint) (*Wish, error) {
 	return &wish, nil
 }
 
-func (db *DB) GetFutureWishes() ([]Wish, error) {
+func (db *DB) GetWishesByPlanID(planID uint) ([]Wish, error) {
 	var wishes []Wish
-	now := time.Now().UTC()
-	result := db.db.
-		Joins("Plan").
-		Where("Plan.wake_at > ?", now).
-		Find(&wishes)
+	result := db.db.Where("plan_id = ?", planID).Find(&wishes)
 	if result.Error != nil {
 		return nil, result.Error
 	}
 	return wishes, nil
+}
+
+func (db *DB) GetFuturePlans() ([]Plan, error) {
+	var plans []Plan
+	now := time.Now().UTC()
+	result := db.db.
+		Where("wake_at > ?", now).
+		Find(&plans)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	return plans, nil
 }
