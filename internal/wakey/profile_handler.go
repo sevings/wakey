@@ -3,6 +3,7 @@ package wakey
 import (
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"go.uber.org/zap"
@@ -222,18 +223,27 @@ func (ph *ProfileHandler) HandleBioUpdate(c tele.Context) error {
 	return c.Send("Ваше био успешно обновлено.")
 }
 
-func (ph *ProfileHandler) HandleTimeInput(c tele.Context) error {
-	userID := c.Sender().ID
+func getTimeZoneOffset(c tele.Context) (int32, error) {
 	timeStr := c.Text()
 
 	userTime, err := parseTime(timeStr, 0) // Use 0 as initial timezone offset
 	if err != nil {
-		return c.Send(err.Error())
+		return 0, err
 	}
 
 	// Calculate timezone offset
 	tzOffset := int32(userTime.Sub(time.Now().UTC()).Minutes())
+	tzOffset = int32(math.Round(float64(tzOffset)/15) * 15)
+	return tzOffset, nil
+}
 
+func (ph *ProfileHandler) HandleTimeInput(c tele.Context) error {
+	userID := c.Sender().ID
+
+	tzOffset, err := getTimeZoneOffset(c)
+	if err != nil {
+		return c.Send(err.Error())
+	}
 	userData, _ := ph.stateMan.GetUserData(userID)
 
 	// Create new user in database
@@ -255,13 +265,11 @@ func (ph *ProfileHandler) HandleTimeInput(c tele.Context) error {
 
 func (ph *ProfileHandler) HandleTimezoneUpdate(c tele.Context) error {
 	userID := c.Sender().ID
-	timeStr := c.Text()
 
-	userTime, err := parseTime(timeStr, 0) // Use 0 as initial timezone offset
+	tzOffset, err := getTimeZoneOffset(c)
 	if err != nil {
 		return c.Send(err.Error())
 	}
-	tzOffset := int32(userTime.Sub(time.Now().UTC()).Minutes())
 
 	user, err := ph.db.GetUser(userID)
 	if err != nil {

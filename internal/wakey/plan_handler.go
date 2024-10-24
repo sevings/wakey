@@ -182,13 +182,14 @@ func (ph *PlanHandler) HandlePlansUpdate(c tele.Context) error {
 	userID := c.Sender().ID
 	newPlans := c.Text()
 
+	now := time.Now().UTC()
 	plan, err := ph.db.GetLatestPlan(userID)
 	if err != nil {
 		if err == ErrNotFound {
 			// Create a new plan if no existing plan is found
 			plan = &Plan{
 				UserID: userID,
-				WakeAt: time.Now().UTC().Add(24 * time.Hour), // Set default wake time to 24 hours from now
+				WakeAt: now.Add(24 * time.Hour), // Set default wake time to 24 hours from now
 			}
 		} else {
 			ph.log.Errorw("failed to get latest plan", "error", err)
@@ -196,6 +197,10 @@ func (ph *PlanHandler) HandlePlansUpdate(c tele.Context) error {
 		}
 	}
 	plan.Content = newPlans
+
+	for plan.WakeAt.Before(now) {
+		plan.WakeAt = plan.WakeAt.Add(24 * time.Hour)
+	}
 
 	if err := ph.db.SavePlan(plan); err != nil {
 		ph.log.Errorw("failed to save plan", "error", err)

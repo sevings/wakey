@@ -141,6 +141,10 @@ func (db *DB) CopyPlanForNextDay(userID int64) error {
 		return ErrNotFound
 	}
 
+	if latestPlan.WakeAt.After(time.Now().UTC()) {
+		return nil
+	}
+
 	newPlan := Plan{
 		UserID:  userID,
 		Content: latestPlan.Content,
@@ -209,7 +213,11 @@ func (db *DB) SaveWish(wish *Wish) error {
 
 func (db *DB) GetWishByID(wishID uint) (*Wish, error) {
 	var wish Wish
-	result := db.db.Where("id = ?", wishID).Limit(1).Find(&wish)
+	result := db.db.
+		Joins("Plan").
+		Where("id = ?", wishID).
+		Limit(1).
+		Find(&wish)
 	if result.Error != nil {
 		return nil, result.Error
 	}
