@@ -176,16 +176,20 @@ func (ph *PlanHandler) HandleWakeTimeInput(c tele.Context) error {
 	}
 	ph.scheduleWishSend(plan)
 
-	// Check if we're in the registration process
-	if userData.Name != "" {
-		// Ask for notification time
-		ph.stateMan.SetState(userID, StateAwaitingNotificationTime)
-		return c.Send("Отлично! Теперь укажите, в какое время вы хотели бы получать напоминание о планах на следующий день? (Используйте формат ЧЧ:ММ или отправьте 'отключить', чтобы отключить уведомления)")
+	err = c.Send("Ваше время пробуждения успешно обновлено.")
+	if err != nil {
+		return err
 	}
 
-	// If not in registration, finish here
-	ph.stateMan.SetState(userID, StateSuggestActions)
-	return c.Send("Ваше время пробуждения успешно обновлено.")
+	// Ask if the user wants to send a wish
+	inlineKeyboard := &tele.ReplyMarkup{}
+	btnYes := inlineKeyboard.Data("Да", btnSendWishYes)
+	btnNo := inlineKeyboard.Data("Нет", btnSendWishNo)
+	inlineKeyboard.Inline(
+		inlineKeyboard.Row(btnYes, btnNo),
+	)
+
+	return c.Send("Хотите отправить пожелание другому пользователю?", inlineKeyboard)
 }
 
 func (ph *PlanHandler) HandlePlansUpdate(c tele.Context) error {
@@ -329,15 +333,8 @@ func (ph *PlanHandler) HandleNotificationTimeInput(c tele.Context) error {
 		return err
 	}
 
-	// Ask if the user wants to send a wish
-	inlineKeyboard := &tele.ReplyMarkup{}
-	btnYes := inlineKeyboard.Data("Да", btnSendWishYes)
-	btnNo := inlineKeyboard.Data("Нет", btnSendWishNo)
-	inlineKeyboard.Inline(
-		inlineKeyboard.Row(btnYes, btnNo),
-	)
-
-	return c.Send("Хотите отправить пожелание другому пользователю?", inlineKeyboard)
+	ph.stateMan.SetState(userID, StateAwaitingPlans)
+	return c.Send("Теперь расскажите о ваших планах на завтра.")
 }
 
 func (ph *PlanHandler) HandleNotificationTimeUpdate(c tele.Context) error {

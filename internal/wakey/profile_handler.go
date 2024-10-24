@@ -259,9 +259,8 @@ func (ph *ProfileHandler) HandleTimeInput(c tele.Context) error {
 		return c.Send("Извините, произошла ошибка при сохранении вашей информации. Пожалуйста, попробуйте позже.")
 	}
 
-	// Registration complete
-	ph.stateMan.SetState(userID, StateAwaitingPlans)
-	return c.Send("Отлично! Теперь расскажите о ваших планах на завтра.")
+	ph.stateMan.SetState(userID, StateAwaitingNotificationTime)
+	return c.Send("Отлично! Теперь укажите, в какое время вы хотели бы получать напоминание о планах на следующий день? (Используйте формат ЧЧ:ММ или отправьте 'отключить', чтобы отключить уведомления)")
 }
 
 func (ph *ProfileHandler) HandleTimezoneUpdate(c tele.Context) error {
