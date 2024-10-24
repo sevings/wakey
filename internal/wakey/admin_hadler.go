@@ -66,7 +66,7 @@ func (ah *AdminHandler) HandleState(c tele.Context, state UserState) error {
 }
 
 func (h *AdminHandler) HandleBanCallback(c tele.Context) error {
-	data := strings.Split(c.Data(), ":")
+	data := strings.Split(c.Data(), "|")
 	action := strings.TrimSpace(data[0])
 	userIDStr := data[1]
 
@@ -75,7 +75,7 @@ func (h *AdminHandler) HandleBanCallback(c tele.Context) error {
 		return c.Edit("Ошибка при обработке ID пользователя.")
 	}
 
-	user, err := h.db.GetUser(userID)
+	user, err := h.db.GetUserByID(userID)
 	if err != nil {
 		h.log.Errorw("failed to get user", "error", err, "userID", userID)
 		return c.Edit("Ошибка при получении информации о пользователе.")
