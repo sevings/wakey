@@ -273,7 +273,8 @@ func (bot *Bot) suggestActions(c tele.Context) error {
 	btnChangePlans := inlineKeyboard.Data("Изменить планы на завтра", btnChangePlans)
 	btnChangeWakeTime := inlineKeyboard.Data("Изменить время пробуждения", btnChangeWakeTime)
 	btnChangeNotifyTime := inlineKeyboard.Data("Изменить время уведомления", btnChangeNotifyTime)
-	btnInviteFriends := inlineKeyboard.Data("Пригласить друзей", "invite_friends")
+	btnSendWish := inlineKeyboard.Data("Отправить пожелание", btnSendWishYes)
+	btnInviteFriends := inlineKeyboard.Data("Пригласить друзей", btnInviteFriends)
 	btnDoNothing := inlineKeyboard.Data("Ничего, до свидания", btnDoNothing)
 
 	inlineKeyboard.Inline(
@@ -284,6 +285,7 @@ func (bot *Bot) suggestActions(c tele.Context) error {
 		inlineKeyboard.Row(btnChangePlans),
 		inlineKeyboard.Row(btnChangeWakeTime),
 		inlineKeyboard.Row(btnChangeNotifyTime),
+		inlineKeyboard.Row(btnSendWish),
 		inlineKeyboard.Row(btnInviteFriends),
 		inlineKeyboard.Row(btnDoNothing),
 	)
@@ -306,7 +308,7 @@ func parseTime(timeStr string, userTz int32) (time.Time, error) {
 	// Parse the time
 	t, err := time.Parse("15:04", timeStr)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("неверный формат времени. Пожалуйста, используйте формат ЧЧ:ММ (например, 14:30)")
+		return time.Time{}, fmt.Errorf("Неверный формат времени. Пожалуйста, используйте формат ЧЧ:ММ (например, 14:30)")
 	}
 
 	// Create a time.Location using the user's timezone offset
@@ -317,7 +319,7 @@ func parseTime(timeStr string, userTz int32) (time.Time, error) {
 	userTime := time.Date(now.Year(), now.Month(), now.Day(), t.Hour(), t.Minute(), 0, 0, userLoc)
 
 	// If the resulting time is in the past, assume it's for tomorrow
-	if userTime.Before(now) {
+	for userTime.Before(now) {
 		userTime = userTime.Add(24 * time.Hour)
 	}
 
