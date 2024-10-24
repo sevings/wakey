@@ -184,7 +184,7 @@ func (ph *PlanHandler) HandleWakeTimeInput(c tele.Context) error {
 	}
 
 	// If not in registration, finish here
-	ph.stateMan.ClearState(userID)
+	ph.stateMan.SetState(userID, StateSuggestActions)
 	return c.Send("Ваше время пробуждения успешно обновлено.")
 }
 
@@ -217,7 +217,7 @@ func (ph *PlanHandler) HandlePlansUpdate(c tele.Context) error {
 		return c.Send("Извините, произошла ошибка при сохранении ваших планов. Пожалуйста, попробуйте позже.")
 	}
 
-	ph.stateMan.ClearState(userID)
+	ph.stateMan.SetState(userID, StateSuggestActions)
 	return c.Send("Ваши планы успешно обновлены.")
 }
 
@@ -256,7 +256,7 @@ func (ph *PlanHandler) HandleWakeTimeUpdate(c tele.Context) error {
 		return c.Send("Извините, произошла ошибка при сохранении вашего времени пробуждения. Пожалуйста, попробуйте позже.")
 	}
 
-	ph.stateMan.ClearState(userID)
+	ph.stateMan.SetState(userID, StateSuggestActions)
 	ph.wishSched.Schedule(plan.WakeAt, JobID(plan.ID))
 	return c.Send(fmt.Sprintf("Ваше время пробуждения успешно обновлено на %s.", wakeTimeStr))
 }
@@ -366,7 +366,7 @@ func (ph *PlanHandler) HandleNotificationTimeUpdate(c tele.Context) error {
 	}
 
 	ph.schedulePlanReminder(user)
-	ph.stateMan.ClearState(userID)
+	ph.stateMan.SetState(userID, StateSuggestActions)
 
 	if user.NotifyAt.IsZero() {
 		return c.Send("Уведомления о планах отключены.")

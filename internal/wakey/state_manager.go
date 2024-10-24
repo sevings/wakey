@@ -23,6 +23,7 @@ const (
 	StateUpdatingPlans
 	StateUpdatingWakeTime
 	StateUpdatingNotificationTime
+	StateSuggestActions
 )
 
 type UserData struct {

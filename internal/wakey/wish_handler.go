@@ -169,6 +169,7 @@ func (wh *WishHandler) HandleSendWishNo(c tele.Context) error {
 		return c.Send("Произошла ошибка при обработке вашего ответа.")
 	}
 
+	wh.stateMan.SetState(c.Sender().ID, StateSuggestActions)
 	return nil
 }
 
@@ -232,7 +233,7 @@ func (wh *WishHandler) HandleWishInput(c tele.Context) error {
 		return c.Send("Извините, произошла ошибка при сохранении вашего пожелания. Пожалуйста, попробуйте позже.")
 	}
 
-	wh.stateMan.ClearState(userID)
+	wh.stateMan.SetState(userID, StateSuggestActions)
 	return c.Send("Спасибо! Ваше пожелание отправлено и будет доставлено пользователю в запланированное время.")
 }
 

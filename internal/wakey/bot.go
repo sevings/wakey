@@ -243,7 +243,19 @@ func (bot *Bot) handleCallback(c tele.Context) error {
 		return c.Edit("Неизвестное действие. Пожалуйста, попробуйте еще раз.")
 	}
 
-	return handler.HandleAction(c, action)
+	err := handler.HandleAction(c, action)
+	if err != nil {
+		return err
+	}
+
+	userID := c.Sender().ID
+	state, exists := bot.stateManager.GetState(userID)
+	if exists && state == StateSuggestActions {
+		bot.stateManager.ClearState(userID)
+		return bot.suggestActions(c)
+	}
+
+	return nil
 }
 
 func (bot *Bot) handleText(c tele.Context) error {
@@ -260,7 +272,18 @@ func (bot *Bot) handleText(c tele.Context) error {
 		return bot.suggestActions(c)
 	}
 
-	return handler.HandleState(c, state)
+	err := handler.HandleState(c, state)
+	if err != nil {
+		return err
+	}
+
+	state, exists = bot.stateManager.GetState(userID)
+	if exists && state == StateSuggestActions {
+		bot.stateManager.ClearState(userID)
+		return bot.suggestActions(c)
+	}
+
+	return nil
 }
 
 func (bot *Bot) suggestActions(c tele.Context) error {
@@ -290,7 +313,7 @@ func (bot *Bot) suggestActions(c tele.Context) error {
 		inlineKeyboard.Row(btnDoNothing),
 	)
 
-	return c.Send("Похоже, вы не выполняете никаких действий. Что бы вы хотели сделать?", inlineKeyboard)
+	return c.Send("Что бы вы хотели сделать?", inlineKeyboard)
 }
 
 func (bot *Bot) handleStart(c tele.Context) error {

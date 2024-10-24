@@ -162,6 +162,7 @@ func (ph *ProfileHandler) HandleShowProfile(c tele.Context) error {
 		profileMsg += "Текущие планы: Не установлены"
 	}
 
+	ph.stateMan.SetState(userID, StateSuggestActions)
 	return c.Edit(profileMsg)
 }
 
@@ -190,7 +191,7 @@ func (ph *ProfileHandler) HandleNameUpdate(c tele.Context) error {
 		return c.Send("Извините, произошла ошибка при сохранении вашей информации. Пожалуйста, попробуйте позже.")
 	}
 
-	ph.stateMan.ClearState(userID)
+	ph.stateMan.SetState(userID, StateSuggestActions)
 	return c.Send(fmt.Sprintf("Ваше имя успешно обновлено на %s.", newName))
 }
 
@@ -219,7 +220,7 @@ func (ph *ProfileHandler) HandleBioUpdate(c tele.Context) error {
 		return c.Send("Извините, произошла ошибка при сохранении вашей информации. Пожалуйста, попробуйте позже.")
 	}
 
-	ph.stateMan.ClearState(userID)
+	ph.stateMan.SetState(userID, StateSuggestActions)
 	return c.Send("Ваше био успешно обновлено.")
 }
 
@@ -283,6 +284,6 @@ func (ph *ProfileHandler) HandleTimezoneUpdate(c tele.Context) error {
 		return c.Send("Извините, произошла ошибка при сохранении вашей информации. Пожалуйста, попробуйте позже.")
 	}
 
-	ph.stateMan.ClearState(userID)
+	ph.stateMan.SetState(userID, StateSuggestActions)
 	return c.Send("Ваш часовой пояс успешно обновлен.")
 }
