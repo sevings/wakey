@@ -143,7 +143,7 @@ func (bot *Bot) Start(cfg Config, api BotAPI, wishSched, planSched Scheduler, bo
 	}
 
 	bot.api.Use(middleware.Recover())
-	bot.api.Use(bot.logCmd)
+	bot.api.Use(bot.logMessage)
 	bot.api.Use(bot.checkBan)
 
 	bot.api.Handle(tele.OnCallback, bot.handleCallback)
@@ -167,42 +167,34 @@ func (bot *Bot) Stop() {
 	bot.api.Stop()
 }
 
-func (bot *Bot) logMessage(c tele.Context, beginTime int64, err error) {
-	endTime := time.Now().UnixNano()
-	duration := float64(endTime-beginTime) / 1000000
-
-	isCmd := len(c.Text()) > 0 && c.Text()[0] == '/' && len(c.Entities()) == 1
-	isAction := c.Callback() != nil
-	var cmd string
-	if isCmd {
-		cmd = c.Text()
-	} else if isAction {
-		cmd = strings.TrimSpace(strings.Split(c.Callback().Data, "|")[0])
-	}
-	bot.log.Infow("user message",
-		"chat_id", c.Chat().ID,
-		"chat_type", c.Chat().Type,
-		"user_id", c.Sender().ID,
-		"user_name", c.Sender().Username,
-		"is_cmd", isCmd,
-		"is_action", isAction,
-		"cmd", cmd,
-		"size", len(c.Text()),
-		"dur", fmt.Sprintf("%.2f", duration),
-		"err", err)
-}
-
-func (bot *Bot) logCmd(next tele.HandlerFunc) tele.HandlerFunc {
+func (bot *Bot) logMessage(next tele.HandlerFunc) tele.HandlerFunc {
 	return func(c tele.Context) error {
 		beginTime := time.Now().UnixNano()
-		isBotCmd := len(c.Text()) > 0 && c.Text()[0] == '/' && len(c.Entities()) == 1
-		isAction := c.Callback() != nil
 
 		err := next(c)
 
-		if isBotCmd || isAction {
-			bot.logMessage(c, beginTime, err)
+		endTime := time.Now().UnixNano()
+		duration := float64(endTime-beginTime) / 1000000
+
+		isCmd := len(c.Text()) > 0 && c.Text()[0] == '/' && len(c.Entities()) == 1
+		isAction := c.Callback() != nil
+		var action string
+		if isCmd {
+			action = c.Text()
+		} else if isAction {
+			action = strings.TrimSpace(strings.Split(c.Callback().Data, "|")[0])
 		}
+		bot.log.Infow("user message",
+			"chat_id", c.Chat().ID,
+			"chat_type", c.Chat().Type,
+			"user_id", c.Sender().ID,
+			"user_name", c.Sender().Username,
+			"is_cmd", isCmd,
+			"is_action", isAction,
+			"action", action,
+			"size", len(c.Text()),
+			"dur", fmt.Sprintf("%.2f", duration),
+			"err", err)
 
 		return err
 	}
@@ -213,13 +205,16 @@ func (bot *Bot) LogError(err error, c tele.Context) {
 		bot.log.Errorw("error", "err", err)
 	} else {
 		isCmd := len(c.Text()) > 0 && c.Text()[0] == '/' && len(c.Entities()) == 1
-		var cmd string
+		isAction := c.Callback() != nil
+		var action string
 		if isCmd {
-			cmd = c.Text()
-			idx := strings.Index(cmd, " ")
+			action = c.Text()
+			idx := strings.Index(action, " ")
 			if idx > 0 {
-				cmd = cmd[:idx]
+				action = action[:idx]
 			}
+		} else if isAction {
+			action = strings.TrimSpace(strings.Split(c.Callback().Data, "|")[0])
 		}
 		bot.log.Errorw("error",
 			"chat_id", c.Chat().ID,
@@ -227,7 +222,8 @@ func (bot *Bot) LogError(err error, c tele.Context) {
 			"user_id", c.Sender().ID,
 			"user_name", c.Sender().Username,
 			"is_cmd", isCmd,
-			"cmd", cmd,
+			"is_action", isAction,
+			"action", action,
 			"size", len(c.Text()),
 			"err", err)
 	}
