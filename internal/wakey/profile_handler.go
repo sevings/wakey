@@ -152,8 +152,8 @@ func (ph *ProfileHandler) HandleShowProfile(c tele.Context) error {
 		"Имя: %s\n"+
 		"Био: %s\n"+
 		"Часовой пояс: UTC%+d\n"+
-		"Время пробуждения: %s\n"+
-		"Время уведомления: %s\n",
+		"Время уведомления: %s\n"+
+		"Время пробуждения: %s\n",
 		user.Name, user.Bio, user.Tz/60, localWakeTime, localNotifyTime)
 
 	if plan != nil {

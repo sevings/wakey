@@ -111,9 +111,7 @@ func (db *DB) SavePlan(plan *Plan) error {
 
 func (db *DB) GetLatestPlan(userID int64) (*Plan, error) {
 	var plan Plan
-	now := time.Now().UTC()
 	result := db.db.Where("user_id = ?", userID).
-		Where("wake_at > ?", now).
 		Order("wake_at DESC").
 		Limit(1).
 		Find(&plan)

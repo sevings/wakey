@@ -197,7 +197,7 @@ func (ph *PlanHandler) HandlePlansUpdate(c tele.Context) error {
 	newPlans := c.Text()
 
 	now := time.Now().UTC()
-	plan, err := ph.db.GetLatestPlan(userID)
+	plan, err := ph.db.CopyPlanForNextDay(userID)
 	if err != nil {
 		if err == ErrNotFound {
 			// Create a new plan if no existing plan is found
@@ -240,7 +240,7 @@ func (ph *PlanHandler) HandleWakeTimeUpdate(c tele.Context) error {
 		return c.Send(err.Error())
 	}
 
-	plan, err := ph.db.GetLatestPlan(userID)
+	plan, err := ph.db.CopyPlanForNextDay(userID)
 	if err != nil {
 		if err == ErrNotFound {
 			// Create a new plan if no existing plan is found
@@ -273,18 +273,52 @@ func (ph *PlanHandler) AskAboutPlans(id JobID) {
 		return
 	}
 
+	// Get the latest plan
+	plan, err := ph.db.GetLatestPlan(userID)
+	if err != nil && err != ErrNotFound {
+		ph.log.Errorw("failed to get latest plan", "error", err, "userID", userID)
+		return
+	}
+
+	// Show previous plans first
+	previousPlansMsg := "Пора рассказать о ваших планах на завтра! "
+	if err == ErrNotFound || plan == nil {
+		previousPlansMsg += "У вас пока нет сохраненных планов."
+	} else {
+		// Convert UTC wake time to user's timezone
+		userLoc := time.FixedZone("User Timezone", int(user.Tz)*60)
+		localWakeTime := plan.WakeAt.In(userLoc)
+		previousPlansMsg += fmt.Sprintf(
+			"Ваши текущие планы:\n"+
+				"🎯 Планы: %s\n"+
+				"⏰ Время пробуждения: %s",
+			plan.Content,
+			localWakeTime.Format("15:04"))
+	}
+
+	// Send previous plans message first
+	_, err = ph.api.Send(tele.ChatID(userID), previousPlansMsg)
+	if err != nil {
+		ph.log.Errorw("failed to send previous plans", "error", err, "userID", userID)
+		return
+	}
+
 	// Create inline keyboard
 	inlineKeyboard := &tele.ReplyMarkup{}
 	btnKeep := inlineKeyboard.Data("Оставить как есть", btnKeepPlans)
-	btnUpdate := inlineKeyboard.Data("Обновить планы", btnUpdatePlans)
+	btnChangeAll := inlineKeyboard.Data("Обновить планы и время", btnUpdatePlans)
+	btnChangePlans := inlineKeyboard.Data("Обновить планы", btnChangePlans)
+	btnChangeTime := inlineKeyboard.Data("Обновить время", btnChangeWakeTime)
 	btnNoWish := inlineKeyboard.Data("Не получать пожелание", btnNoWish)
 	inlineKeyboard.Inline(
 		inlineKeyboard.Row(btnKeep),
-		inlineKeyboard.Row(btnUpdate),
+		inlineKeyboard.Row(btnChangeAll),
+		inlineKeyboard.Row(btnChangePlans),
+		inlineKeyboard.Row(btnChangeTime),
 		inlineKeyboard.Row(btnNoWish),
 	)
 
-	_, err = ph.api.Send(tele.ChatID(userID), "Пора рассказать о ваших планах на завтра! Что вы хотите сделать?", inlineKeyboard)
+	_, err = ph.api.Send(tele.ChatID(userID), "Что вы хотите сделать?", inlineKeyboard)
 	if err != nil {
 		ph.log.Errorw("failed to send plan reminder", "error", err, "userID", userID)
 	}
