@@ -40,17 +40,32 @@ func (ph *ProfileHandler) HandleAction(c tele.Context, action string) error {
 	case btnShowProfileID:
 		return ph.HandleShowProfile(c)
 	case btnChangeNameID:
+		err := c.Edit(c.Message().Text + "\n\n" + btnChangeNameText)
+		if err != nil {
+			return err
+		}
+
 		ph.stateMan.SetState(userID, StateUpdatingName)
-		return c.Edit("Пожалуйста, введите ваше новое имя.")
+		return c.Send("Пожалуйста, введите ваше новое имя.")
 	case btnChangeBioID:
+		err := c.Edit(c.Message().Text + "\n\n" + btnChangeBioText)
+		if err != nil {
+			return err
+		}
+
 		ph.stateMan.SetState(userID, StateUpdatingBio)
-		return c.Edit("Пожалуйста, введите ваше новое био.")
+		return c.Send("Пожалуйста, введите ваше новое био.")
 	case btnChangeTimezoneID:
+		err := c.Edit(c.Message().Text + "\n\n" + btnChangeTimezoneText)
+		if err != nil {
+			return err
+		}
+
 		ph.stateMan.SetState(userID, StateUpdatingTimezone)
-		return c.Edit("Пожалуйста, введите текущее время в формате ЧЧ:ММ.")
+		return c.Send("Пожалуйста, введите текущее время в формате ЧЧ:ММ.")
 	default:
 		ph.log.Errorw("unexpected action for ProfileHandler", "action", action)
-		return c.Edit("Неизвестное действие. Пожалуйста, попробуйте еще раз.")
+		return c.Send("Неизвестное действие. Пожалуйста, попробуйте еще раз.")
 	}
 }
 
@@ -122,18 +137,23 @@ func (ph *ProfileHandler) HandleStart(c tele.Context) error {
 }
 
 func (ph *ProfileHandler) HandleShowProfile(c tele.Context) error {
+	err := c.Edit(c.Message().Text + "\n\n" + btnShowProfileText)
+	if err != nil {
+		return err
+	}
+
 	userID := c.Sender().ID
 
 	user, err := ph.db.GetUserByID(userID)
 	if err != nil {
 		ph.log.Errorw("failed to load user", "error", err)
-		return c.Edit("Извините, произошла ошибка при загрузке вашего профиля. Пожалуйста, попробуйте позже.")
+		return c.Send("Извините, произошла ошибка при загрузке вашего профиля. Пожалуйста, попробуйте позже.")
 	}
 
 	plan, err := ph.db.GetLatestPlan(userID)
 	if err != nil && err != ErrNotFound {
 		ph.log.Errorw("failed to load latest plan", "error", err)
-		return c.Edit("Извините, произошла ошибка при загрузке ваших планов. Пожалуйста, попробуйте позже.")
+		return c.Send("Извините, произошла ошибка при загрузке ваших планов. Пожалуйста, попробуйте позже.")
 	}
 
 	userLoc := time.FixedZone("User Timezone", int(user.Tz)*60)
@@ -163,7 +183,7 @@ func (ph *ProfileHandler) HandleShowProfile(c tele.Context) error {
 	}
 
 	ph.stateMan.SetState(userID, StateSuggestActions)
-	return c.Edit(profileMsg)
+	return c.Send(profileMsg)
 }
 
 func (ph *ProfileHandler) HandleNameInput(c tele.Context) error {

@@ -30,26 +30,41 @@ func (gh *GeneralHandler) HandleAction(c tele.Context, action string) error {
 	inviteLink := "https://t.me/" + gh.name
 	switch action {
 	case btnInviteFriendsID:
+		err := c.Edit(c.Message().Text + "\n\n" + btnInviteFriendsText)
+		if err != nil {
+			return err
+		}
+
 		message := "Пригласите друзей присоединиться к нашему боту! Выберите способ:"
 
 		inlineKeyboard := &tele.ReplyMarkup{}
-		btnShowLink := inlineKeyboard.Data("Показать ссылку", btnShowLinkID)
-		btnShareLink := inlineKeyboard.URL("Поделиться", createShareLink(inviteLink))
+		btnShowLink := inlineKeyboard.Data(btnShowLinkText, btnShowLinkID)
+		btnShareLink := inlineKeyboard.URL(btnShareLinkText, createShareLink(inviteLink))
 
 		inlineKeyboard.Inline(
 			inlineKeyboard.Row(btnShowLink),
 			inlineKeyboard.Row(btnShareLink),
 		)
 
-		return c.Edit(message, inlineKeyboard)
+		return c.Send(message, inlineKeyboard)
 	case btnShowLinkID:
+		err := c.Edit(c.Message().Text + "\n\n" + btnShowLinkText)
+		if err != nil {
+			return err
+		}
+
 		message := fmt.Sprintf("Вот ссылка для приглашения друзей:\n\n%s\n\nПросто скопируйте и отправьте её вашим друзьям!", inviteLink)
-		return c.Edit(message)
+		return c.Send(message)
 	case btnDoNothingID:
-		return c.Edit("Хорошо, до свидания! Если вам что-то понадобится, просто напишите мне.")
+		err := c.Edit(c.Message().Text + "\n\n" + btnDoNothingText)
+		if err != nil {
+			return err
+		}
+
+		return c.Send("Хорошо, до свидания! Если вам что-то понадобится, просто напишите мне.")
 	default:
 		gh.log.Errorw("unexpected action for GeneralHandler", "action", action)
-		return c.Edit("Неизвестное действие. Пожалуйста, попробуйте еще раз.")
+		return c.Send("Неизвестное действие. Пожалуйста, попробуйте еще раз.")
 	}
 }
 
@@ -63,7 +78,7 @@ func (gh *GeneralHandler) HandleState(c tele.Context, state UserState) error {
 		return gh.suggestActions(c)
 	default:
 		gh.log.Errorw("unexpected state for GeneralHandler", "state", state)
-		return c.Edit("Неизвестное действие. Пожалуйста, попробуйте еще раз.")
+		return c.Send("Неизвестное действие. Пожалуйста, попробуйте еще раз.")
 	}
 }
 
@@ -85,16 +100,16 @@ func createShareLink(botLink string) string {
 func (gh *GeneralHandler) suggestActions(c tele.Context) error {
 	inlineKeyboard := &tele.ReplyMarkup{}
 
-	btnShowProfile := inlineKeyboard.Data("Показать мой профиль", btnShowProfileID)
-	btnChangeName := inlineKeyboard.Data("Изменить имя", btnChangeNameID)
-	btnChangeBio := inlineKeyboard.Data("Изменить био", btnChangeBioID)
-	btnChangeTimezone := inlineKeyboard.Data("Изменить часовой пояс", btnChangeTimezoneID)
-	btnChangePlans := inlineKeyboard.Data("Изменить планы на завтра", btnChangePlansID)
-	btnChangeWakeTime := inlineKeyboard.Data("Изменить время пробуждения", btnChangeWakeTimeID)
-	btnChangeNotifyTime := inlineKeyboard.Data("Изменить время уведомления", btnChangeNotifyTimeID)
-	btnSendWish := inlineKeyboard.Data("Отправить пожелание", btnSendWishYesID)
-	btnInviteFriends := inlineKeyboard.Data("Пригласить друзей", btnInviteFriendsID)
-	btnDoNothing := inlineKeyboard.Data("Ничего, до свидания", btnDoNothingID)
+	btnShowProfile := inlineKeyboard.Data(btnShowProfileText, btnShowProfileID)
+	btnChangeName := inlineKeyboard.Data(btnChangeNameText, btnChangeNameID)
+	btnChangeBio := inlineKeyboard.Data(btnChangeBioText, btnChangeBioID)
+	btnChangeTimezone := inlineKeyboard.Data(btnChangeTimezoneText, btnChangeTimezoneID)
+	btnChangePlans := inlineKeyboard.Data(btnChangePlansText, btnChangePlansID)
+	btnChangeWakeTime := inlineKeyboard.Data(btnChangeWakeTimeText, btnChangeWakeTimeID)
+	btnChangeNotifyTime := inlineKeyboard.Data(btnChangeNotifyTimeText, btnChangeNotifyTimeID)
+	btnSendWish := inlineKeyboard.Data(btnSendWishYesText, btnSendWishYesID)
+	btnInviteFriends := inlineKeyboard.Data(btnInviteFriendsText, btnInviteFriendsID)
+	btnDoNothing := inlineKeyboard.Data(btnDoNothingText, btnDoNothingID)
 
 	inlineKeyboard.Inline(
 		inlineKeyboard.Row(btnShowProfile),

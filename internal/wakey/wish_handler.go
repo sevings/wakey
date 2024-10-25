@@ -76,7 +76,7 @@ func (wh *WishHandler) HandleAction(c tele.Context, action string) error {
 		}
 	default:
 		wh.log.Errorw("unexpected action for WishHandler", "action", action)
-		return c.Edit("Неизвестное действие. Пожалуйста, попробуйте еще раз.")
+		return c.Send("Неизвестное действие. Пожалуйста, попробуйте еще раз.")
 	}
 }
 
@@ -92,7 +92,7 @@ func (wh *WishHandler) HandleState(c tele.Context, state UserState) error {
 		return wh.HandleWishInput(c)
 	default:
 		wh.log.Errorw("unexpected state for WishHandler", "state", state)
-		return c.Edit("Неизвестное действие. Пожалуйста, попробуйте еще раз.")
+		return c.Send("Неизвестное действие. Пожалуйста, попробуйте еще раз.")
 	}
 }
 
@@ -116,11 +116,21 @@ func (wh *WishHandler) HandleWishLike(c tele.Context, wish *Wish) error {
 		wh.log.Errorw("failed to send thanks message", "error", err, "userID", wish.FromID)
 	}
 
-	return wh.RemoveWishKeyboard(c)
+	err = c.Edit(c.Message().Text + "\n\n" + btnWishLikeText)
+	if err != nil {
+		return err
+	}
+
+	return c.Send("Благодарность за пожелание отправлена.")
 }
 
 func (wh *WishHandler) HandleWishDislike(c tele.Context) error {
-	return wh.RemoveWishKeyboard(c)
+	err := c.Edit(c.Message().Text + "\n\n" + btnWishDislikeText)
+	if err != nil {
+		return err
+	}
+
+	return c.Send("Спасибо за ваш ответ.")
 }
 
 func (wh *WishHandler) HandleWishReport(c tele.Context, wish *Wish) error {
@@ -128,8 +138,8 @@ func (wh *WishHandler) HandleWishReport(c tele.Context, wish *Wish) error {
 		reportMsg := fmt.Sprintf("Жалоба на пожелание:\n\nАвтор ID: %d\nТекст пожелания: %s", wish.FromID, wish.Content)
 
 		inlineKeyboard := &tele.ReplyMarkup{}
-		btnBan := inlineKeyboard.Data("Забанить", btnBanUserID, fmt.Sprintf("%d", wish.FromID))
-		btnSkip := inlineKeyboard.Data("Пропустить", btnSkipBanID, fmt.Sprintf("%d", wish.FromID))
+		btnBan := inlineKeyboard.Data(btnBanUserText, btnBanUserID, fmt.Sprintf("%d", wish.FromID))
+		btnSkip := inlineKeyboard.Data(btnSkipBanText, btnSkipBanID, fmt.Sprintf("%d", wish.FromID))
 		inlineKeyboard.Inline(
 			inlineKeyboard.Row(btnBan, btnSkip),
 		)
@@ -140,37 +150,36 @@ func (wh *WishHandler) HandleWishReport(c tele.Context, wish *Wish) error {
 		}
 	}
 
-	return wh.RemoveWishKeyboard(c)
-}
-
-func (wh *WishHandler) RemoveWishKeyboard(c tele.Context) error {
-	err := c.Edit(c.Message().Text)
+	err := c.Edit(c.Message().Text + "\n\n" + btnWishReportText)
 	if err != nil {
-		wh.log.Errorw("failed to remove wish keyboard", "error", err)
-		return c.Send("Произошла ошибка при обработке вашего ответа.")
+		return err
 	}
 
-	return c.Send("Спасибо за ваш ответ!")
+	return c.Send("Жалоба на пожелание отправлена.")
 }
 
 func (wh *WishHandler) HandleSendWishResponse(c tele.Context) error {
-	err := c.Edit("Хорошо, давайте отправим пожелание!")
+	err := c.Edit(c.Message().Text + "\n\n" + btnSendWishYesText)
 	if err != nil {
-		wh.log.Errorw("failed to remove send wish keyboard", "error", err)
+		return err
+	}
+
+	err = c.Send("Хорошо, давайте отправим пожелание!")
+	if err != nil {
+		return err
 	}
 
 	return wh.FindUserForWish(c)
 }
 
 func (wh *WishHandler) HandleSendWishNo(c tele.Context) error {
-	err := c.Edit("Хорошо, может быть в следующий раз!")
+	err := c.Edit(c.Message().Text + "\n\n" + btnSendWishNoText)
 	if err != nil {
-		wh.log.Errorw("failed to remove send wish keyboard", "error", err)
-		return c.Send("Произошла ошибка при обработке вашего ответа.")
+		return err
 	}
 
 	wh.stateMan.SetState(c.Sender().ID, StateSuggestActions)
-	return nil
+	return c.Send("Хорошо, может быть в следующий раз!")
 }
 
 func (wh *WishHandler) FindUserForWish(c tele.Context) error {
@@ -275,9 +284,9 @@ func (wh *WishHandler) SendWishes(id JobID) {
 
 		// Create inline keyboard
 		inlineKeyboard := &tele.ReplyMarkup{}
-		btnLike := inlineKeyboard.Data("Спасибо, понравилось", btnWishLikeID, fmt.Sprintf("%d", wish.ID))
-		btnDislike := inlineKeyboard.Data("Ну такое…", btnWishDislikeID, fmt.Sprintf("%d", wish.ID))
-		btnReport := inlineKeyboard.Data("Пожаловаться", btnWishReportID, fmt.Sprintf("%d", wish.ID))
+		btnLike := inlineKeyboard.Data(btnWishLikeText, btnWishLikeID, fmt.Sprintf("%d", wish.ID))
+		btnDislike := inlineKeyboard.Data(btnWishDislikeText, btnWishDislikeID, fmt.Sprintf("%d", wish.ID))
+		btnReport := inlineKeyboard.Data(btnWishReportText, btnWishReportID, fmt.Sprintf("%d", wish.ID))
 		inlineKeyboard.Inline(
 			inlineKeyboard.Row(btnLike),
 			inlineKeyboard.Row(btnDislike),

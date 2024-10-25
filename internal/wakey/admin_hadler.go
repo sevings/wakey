@@ -45,7 +45,7 @@ func (ah *AdminHandler) HandleAction(c tele.Context, action string) error {
 
 	if action != btnBanUserID && action != btnSkipBanID {
 		ah.log.Errorw("unexpected action for AdminHandler", "action", action)
-		return c.Edit("Неизвестное действие. Пожалуйста, попробуйте еще раз.")
+		return c.Send("Неизвестное действие. Пожалуйста, попробуйте еще раз.")
 	}
 
 	return ah.HandleBanCallback(c)
@@ -62,7 +62,7 @@ func (ah *AdminHandler) HandleState(c tele.Context, state UserState) error {
 	// Admin handler doesn't handle any specific states,
 	// but we need to implement this method to satisfy the interface
 	ah.log.Errorw("unexpected state for AdminHandler", "state", state)
-	return c.Edit("Неизвестное действие. Пожалуйста, попробуйте еще раз.")
+	return c.Send("Неизвестное действие. Пожалуйста, попробуйте еще раз.")
 }
 
 func (h *AdminHandler) HandleBanCallback(c tele.Context) error {
@@ -70,15 +70,24 @@ func (h *AdminHandler) HandleBanCallback(c tele.Context) error {
 	action := strings.TrimSpace(data[0])
 	userIDStr := data[1]
 
+	btnText := btnBanUserText
+	if action == btnSkipBanID {
+		btnText = btnSkipBanText
+	}
+	err := c.Edit(c.Message().Text + "\n\n" + btnText)
+	if err != nil {
+		return err
+	}
+
 	userID, err := strconv.ParseInt(userIDStr, 10, 64)
 	if err != nil {
-		return c.Edit("Ошибка при обработке ID пользователя.")
+		return c.Send("Ошибка при обработке ID пользователя.")
 	}
 
 	user, err := h.db.GetUserByID(userID)
 	if err != nil {
 		h.log.Errorw("failed to get user", "error", err, "userID", userID)
-		return c.Edit("Ошибка при получении информации о пользователе.")
+		return c.Send("Ошибка при получении информации о пользователе.")
 	}
 
 	switch action {
@@ -86,7 +95,7 @@ func (h *AdminHandler) HandleBanCallback(c tele.Context) error {
 		user.IsBanned = true
 		if err := h.db.SaveUser(user); err != nil {
 			h.log.Errorw("failed to ban user", "error", err, "userID", userID)
-			return c.Edit("Ошибка при бане пользователя.")
+			return c.Send("Ошибка при бане пользователя.")
 		}
 
 		// Notify the banned user
@@ -96,10 +105,10 @@ func (h *AdminHandler) HandleBanCallback(c tele.Context) error {
 			h.log.Errorw("failed to send ban notification to user", "error", err, "userID", userID)
 		}
 
-		return c.Edit(fmt.Sprintf("Пользователь %d забанен и уведомлен.", userID))
+		return c.Send(fmt.Sprintf("Пользователь %d забанен и уведомлен.", userID))
 	case btnSkipBanID:
-		return c.Edit(fmt.Sprintf("Бан пользователя %d пропущен.", userID))
+		return c.Send(fmt.Sprintf("Бан пользователя %d пропущен.", userID))
 	default:
-		return c.Edit("Неизвестное действие.")
+		return c.Send("Неизвестное действие.")
 	}
 }

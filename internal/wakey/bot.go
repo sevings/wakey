@@ -75,6 +75,30 @@ const (
 	btnSkipBanID          = "skip_ban"
 )
 
+const (
+	btnWishLikeText         = "♥ Спасибо, понравилось!"
+	btnWishDislikeText      = "👎 Ну такое…"
+	btnWishReportText       = "⚠️ Пожаловаться"
+	btnSendWishYesText      = "♥ Отправить пожелание"
+	btnSendWishNoText       = "❌ В другой раз"
+	btnKeepPlansText        = "👌 Оставить как есть"
+	btnUpdatePlansText      = "✏️ Обновить планы"
+	btnNoWishText           = "🚫 Не получать пожелание"
+	btnShowProfileText      = "👤 Показать мой профиль"
+	btnChangeNameText       = "📝 Изменить имя"
+	btnChangeBioText        = "📋 Изменить био"
+	btnChangeTimezoneText   = "🌍 Изменить часовой пояс"
+	btnChangePlansText      = "📅 Изменить планы на завтра"
+	btnChangeWakeTimeText   = "⏰ Изменить время пробуждения"
+	btnChangeNotifyTimeText = "🔔 Изменить время уведомления"
+	btnInviteFriendsText    = "👥 Пригласить друзей"
+	btnDoNothingText        = "🤷‍♂️ Ничего, до свидания"
+	btnShowLinkText         = "🔗 Показать ссылку"
+	btnShareLinkText        = "📤 Поделиться ссылкой"
+	btnBanUserText          = "🚫 Забанить пользователя"
+	btnSkipBanText          = "⏭️ Пропустить"
+)
+
 func NewBot(db *DB) *Bot {
 	bot := &Bot{
 		db:             db,
