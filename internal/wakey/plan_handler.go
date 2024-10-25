@@ -39,12 +39,12 @@ func (ph *PlanHandler) SetAPI(api BotAPI) {
 
 func (ph *PlanHandler) Actions() []string {
 	return []string{
-		btnChangePlans,
-		btnChangeWakeTime,
-		btnChangeNotifyTime,
-		btnKeepPlans,
-		btnUpdatePlans,
-		btnNoWish,
+		btnChangePlansID,
+		btnChangeWakeTimeID,
+		btnChangeNotifyTimeID,
+		btnKeepPlansID,
+		btnUpdatePlansID,
+		btnNoWishID,
 	}
 }
 
@@ -52,17 +52,17 @@ func (ph *PlanHandler) HandleAction(c tele.Context, action string) error {
 	userID := c.Sender().ID
 
 	switch action {
-	case btnChangePlans:
+	case btnChangePlansID:
 		ph.stateMan.SetState(userID, StateUpdatingPlans)
 		return c.Edit("Пожалуйста, введите ваши новые планы на завтра.")
-	case btnChangeWakeTime:
+	case btnChangeWakeTimeID:
 		ph.stateMan.SetState(userID, StateUpdatingWakeTime)
 		return c.Edit("Пожалуйста, введите новое время пробуждения в формате ЧЧ:ММ.")
-	case btnChangeNotifyTime:
+	case btnChangeNotifyTimeID:
 		ph.stateMan.SetState(userID, StateUpdatingNotificationTime)
 		return c.Edit("Пожалуйста, введите новое время уведомления в формате ЧЧ:ММ. " +
 			"Если вы хотите отключить уведомления, отправьте 'отключить'.")
-	case btnKeepPlans:
+	case btnKeepPlansID:
 		plan, err := ph.db.CopyPlanForNextDay(userID)
 		if err != nil {
 			ph.log.Errorw("failed to copy plan for next day", "error", err, "userID", userID)
@@ -71,10 +71,10 @@ func (ph *PlanHandler) HandleAction(c tele.Context, action string) error {
 		ph.scheduleWishSend(plan)
 		ph.stateMan.ClearState(userID)
 		return c.Edit("Хорошо, ваши планы и время пробуждения остаются без изменений.")
-	case btnUpdatePlans:
+	case btnUpdatePlansID:
 		ph.stateMan.SetState(userID, StateAwaitingPlans)
 		return c.Edit("Пожалуйста, расскажите о ваших новых планах на завтра.")
-	case btnNoWish:
+	case btnNoWishID:
 		ph.stateMan.ClearState(userID)
 		return c.Edit("Хорошо, вы не получите пожелание завтра.")
 	default:
@@ -183,8 +183,8 @@ func (ph *PlanHandler) HandleWakeTimeInput(c tele.Context) error {
 
 	// Ask if the user wants to send a wish
 	inlineKeyboard := &tele.ReplyMarkup{}
-	btnYes := inlineKeyboard.Data("Да", btnSendWishYes)
-	btnNo := inlineKeyboard.Data("Нет", btnSendWishNo)
+	btnYes := inlineKeyboard.Data("Да", btnSendWishYesID)
+	btnNo := inlineKeyboard.Data("Нет", btnSendWishNoID)
 	inlineKeyboard.Inline(
 		inlineKeyboard.Row(btnYes, btnNo),
 	)
@@ -305,11 +305,11 @@ func (ph *PlanHandler) AskAboutPlans(id JobID) {
 
 	// Create inline keyboard
 	inlineKeyboard := &tele.ReplyMarkup{}
-	btnKeep := inlineKeyboard.Data("Оставить как есть", btnKeepPlans)
-	btnChangeAll := inlineKeyboard.Data("Обновить планы и время", btnUpdatePlans)
-	btnChangePlans := inlineKeyboard.Data("Обновить планы", btnChangePlans)
-	btnChangeTime := inlineKeyboard.Data("Обновить время", btnChangeWakeTime)
-	btnNoWish := inlineKeyboard.Data("Не получать пожелание", btnNoWish)
+	btnKeep := inlineKeyboard.Data("Оставить как есть", btnKeepPlansID)
+	btnChangeAll := inlineKeyboard.Data("Обновить планы и время", btnUpdatePlansID)
+	btnChangePlans := inlineKeyboard.Data("Обновить планы", btnChangePlansID)
+	btnChangeTime := inlineKeyboard.Data("Обновить время", btnChangeWakeTimeID)
+	btnNoWish := inlineKeyboard.Data("Не получать пожелание", btnNoWishID)
 	inlineKeyboard.Inline(
 		inlineKeyboard.Row(btnKeep),
 		inlineKeyboard.Row(btnChangeAll),

@@ -23,17 +23,17 @@ func NewGeneralHandler(db *DB, log *zap.SugaredLogger, botName string) *GeneralH
 }
 
 func (gh *GeneralHandler) Actions() []string {
-	return []string{btnDoNothing, btnInviteFriends, btnShowLink}
+	return []string{btnDoNothingID, btnInviteFriendsID, btnShowLinkID}
 }
 
 func (gh *GeneralHandler) HandleAction(c tele.Context, action string) error {
 	inviteLink := "https://t.me/" + gh.name
 	switch action {
-	case btnInviteFriends:
+	case btnInviteFriendsID:
 		message := "Пригласите друзей присоединиться к нашему боту! Выберите способ:"
 
 		inlineKeyboard := &tele.ReplyMarkup{}
-		btnShowLink := inlineKeyboard.Data("Показать ссылку", btnShowLink)
+		btnShowLink := inlineKeyboard.Data("Показать ссылку", btnShowLinkID)
 		btnShareLink := inlineKeyboard.URL("Поделиться", createShareLink(inviteLink))
 
 		inlineKeyboard.Inline(
@@ -42,10 +42,10 @@ func (gh *GeneralHandler) HandleAction(c tele.Context, action string) error {
 		)
 
 		return c.Edit(message, inlineKeyboard)
-	case btnShowLink:
+	case btnShowLinkID:
 		message := fmt.Sprintf("Вот ссылка для приглашения друзей:\n\n%s\n\nПросто скопируйте и отправьте её вашим друзьям!", inviteLink)
 		return c.Edit(message)
-	case btnDoNothing:
+	case btnDoNothingID:
 		return c.Edit("Хорошо, до свидания! Если вам что-то понадобится, просто напишите мне.")
 	default:
 		gh.log.Errorw("unexpected action for GeneralHandler", "action", action)
@@ -85,16 +85,16 @@ func createShareLink(botLink string) string {
 func (gh *GeneralHandler) suggestActions(c tele.Context) error {
 	inlineKeyboard := &tele.ReplyMarkup{}
 
-	btnShowProfile := inlineKeyboard.Data("Показать мой профиль", btnShowProfile)
-	btnChangeName := inlineKeyboard.Data("Изменить имя", btnChangeName)
-	btnChangeBio := inlineKeyboard.Data("Изменить био", btnChangeBio)
-	btnChangeTimezone := inlineKeyboard.Data("Изменить часовой пояс", btnChangeTimezone)
-	btnChangePlans := inlineKeyboard.Data("Изменить планы на завтра", btnChangePlans)
-	btnChangeWakeTime := inlineKeyboard.Data("Изменить время пробуждения", btnChangeWakeTime)
-	btnChangeNotifyTime := inlineKeyboard.Data("Изменить время уведомления", btnChangeNotifyTime)
-	btnSendWish := inlineKeyboard.Data("Отправить пожелание", btnSendWishYes)
-	btnInviteFriends := inlineKeyboard.Data("Пригласить друзей", btnInviteFriends)
-	btnDoNothing := inlineKeyboard.Data("Ничего, до свидания", btnDoNothing)
+	btnShowProfile := inlineKeyboard.Data("Показать мой профиль", btnShowProfileID)
+	btnChangeName := inlineKeyboard.Data("Изменить имя", btnChangeNameID)
+	btnChangeBio := inlineKeyboard.Data("Изменить био", btnChangeBioID)
+	btnChangeTimezone := inlineKeyboard.Data("Изменить часовой пояс", btnChangeTimezoneID)
+	btnChangePlans := inlineKeyboard.Data("Изменить планы на завтра", btnChangePlansID)
+	btnChangeWakeTime := inlineKeyboard.Data("Изменить время пробуждения", btnChangeWakeTimeID)
+	btnChangeNotifyTime := inlineKeyboard.Data("Изменить время уведомления", btnChangeNotifyTimeID)
+	btnSendWish := inlineKeyboard.Data("Отправить пожелание", btnSendWishYesID)
+	btnInviteFriends := inlineKeyboard.Data("Пригласить друзей", btnInviteFriendsID)
+	btnDoNothing := inlineKeyboard.Data("Ничего, до свидания", btnDoNothingID)
 
 	inlineKeyboard.Inline(
 		inlineKeyboard.Row(btnShowProfile),

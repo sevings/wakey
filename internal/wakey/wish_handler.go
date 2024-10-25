@@ -40,23 +40,23 @@ func (wh *WishHandler) SetAdminID(adminID int64) {
 
 func (wh *WishHandler) Actions() []string {
 	return []string{
-		btnWishLike,
-		btnWishDislike,
-		btnWishReport,
-		btnSendWishYes,
-		btnSendWishNo,
+		btnWishLikeID,
+		btnWishDislikeID,
+		btnWishReportID,
+		btnSendWishYesID,
+		btnSendWishNoID,
 	}
 }
 
 func (wh *WishHandler) HandleAction(c tele.Context, action string) error {
 	switch action {
-	case btnSendWishYes:
+	case btnSendWishYesID:
 		return wh.HandleSendWishResponse(c)
-	case btnSendWishNo:
+	case btnSendWishNoID:
 		return wh.HandleSendWishNo(c)
-	case btnWishDislike:
+	case btnWishDislikeID:
 		return wh.HandleWishDislike(c)
-	case btnWishLike, btnWishReport:
+	case btnWishLikeID, btnWishReportID:
 		data := strings.Split(c.Data(), "|")
 		if len(data) != 2 {
 			return c.Send("Неверный формат данных.")
@@ -69,7 +69,7 @@ func (wh *WishHandler) HandleAction(c tele.Context, action string) error {
 		if err != nil {
 			return c.Send("Не удалось найти пожелание.")
 		}
-		if action == btnWishLike {
+		if action == btnWishLikeID {
 			return wh.HandleWishLike(c, wish)
 		} else {
 			return wh.HandleWishReport(c, wish)
@@ -128,8 +128,8 @@ func (wh *WishHandler) HandleWishReport(c tele.Context, wish *Wish) error {
 		reportMsg := fmt.Sprintf("Жалоба на пожелание:\n\nАвтор ID: %d\nТекст пожелания: %s", wish.FromID, wish.Content)
 
 		inlineKeyboard := &tele.ReplyMarkup{}
-		btnBan := inlineKeyboard.Data("Забанить", btnBanUser, fmt.Sprintf("%d", wish.FromID))
-		btnSkip := inlineKeyboard.Data("Пропустить", btnSkipBan, fmt.Sprintf("%d", wish.FromID))
+		btnBan := inlineKeyboard.Data("Забанить", btnBanUserID, fmt.Sprintf("%d", wish.FromID))
+		btnSkip := inlineKeyboard.Data("Пропустить", btnSkipBanID, fmt.Sprintf("%d", wish.FromID))
 		inlineKeyboard.Inline(
 			inlineKeyboard.Row(btnBan, btnSkip),
 		)
@@ -275,9 +275,9 @@ func (wh *WishHandler) SendWishes(id JobID) {
 
 		// Create inline keyboard
 		inlineKeyboard := &tele.ReplyMarkup{}
-		btnLike := inlineKeyboard.Data("Спасибо, понравилось", btnWishLike, fmt.Sprintf("%d", wish.ID))
-		btnDislike := inlineKeyboard.Data("Ну такое…", btnWishDislike, fmt.Sprintf("%d", wish.ID))
-		btnReport := inlineKeyboard.Data("Пожаловаться", btnWishReport, fmt.Sprintf("%d", wish.ID))
+		btnLike := inlineKeyboard.Data("Спасибо, понравилось", btnWishLikeID, fmt.Sprintf("%d", wish.ID))
+		btnDislike := inlineKeyboard.Data("Ну такое…", btnWishDislikeID, fmt.Sprintf("%d", wish.ID))
+		btnReport := inlineKeyboard.Data("Пожаловаться", btnWishReportID, fmt.Sprintf("%d", wish.ID))
 		inlineKeyboard.Inline(
 			inlineKeyboard.Row(btnLike),
 			inlineKeyboard.Row(btnDislike),

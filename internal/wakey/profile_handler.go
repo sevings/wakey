@@ -26,10 +26,10 @@ func NewProfileHandler(db *DB, stateMan *StateManager, log *zap.SugaredLogger) *
 
 func (ph *ProfileHandler) Actions() []string {
 	return []string{
-		btnShowProfile,
-		btnChangeName,
-		btnChangeBio,
-		btnChangeTimezone,
+		btnShowProfileID,
+		btnChangeNameID,
+		btnChangeBioID,
+		btnChangeTimezoneID,
 	}
 }
 
@@ -37,15 +37,15 @@ func (ph *ProfileHandler) HandleAction(c tele.Context, action string) error {
 	userID := c.Sender().ID
 
 	switch action {
-	case btnShowProfile:
+	case btnShowProfileID:
 		return ph.HandleShowProfile(c)
-	case btnChangeName:
+	case btnChangeNameID:
 		ph.stateMan.SetState(userID, StateUpdatingName)
 		return c.Edit("Пожалуйста, введите ваше новое имя.")
-	case btnChangeBio:
+	case btnChangeBioID:
 		ph.stateMan.SetState(userID, StateUpdatingBio)
 		return c.Edit("Пожалуйста, введите ваше новое био.")
-	case btnChangeTimezone:
+	case btnChangeTimezoneID:
 		ph.stateMan.SetState(userID, StateUpdatingTimezone)
 		return c.Edit("Пожалуйста, введите текущее время в формате ЧЧ:ММ.")
 	default:

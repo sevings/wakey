@@ -33,8 +33,8 @@ func (ah *AdminHandler) SetAdminID(adminID int64) {
 
 func (ah *AdminHandler) Actions() []string {
 	return []string{
-		btnBanUser,
-		btnSkipBan,
+		btnBanUserID,
+		btnSkipBanID,
 	}
 }
 
@@ -43,7 +43,7 @@ func (ah *AdminHandler) HandleAction(c tele.Context, action string) error {
 		return nil
 	}
 
-	if action != btnBanUser && action != btnSkipBan {
+	if action != btnBanUserID && action != btnSkipBanID {
 		ah.log.Errorw("unexpected action for AdminHandler", "action", action)
 		return c.Edit("Неизвестное действие. Пожалуйста, попробуйте еще раз.")
 	}
@@ -82,7 +82,7 @@ func (h *AdminHandler) HandleBanCallback(c tele.Context) error {
 	}
 
 	switch action {
-	case btnBanUser:
+	case btnBanUserID:
 		user.IsBanned = true
 		if err := h.db.SaveUser(user); err != nil {
 			h.log.Errorw("failed to ban user", "error", err, "userID", userID)
@@ -97,7 +97,7 @@ func (h *AdminHandler) HandleBanCallback(c tele.Context) error {
 		}
 
 		return c.Edit(fmt.Sprintf("Пользователь %d забанен и уведомлен.", userID))
-	case btnSkipBan:
+	case btnSkipBanID:
 		return c.Edit(fmt.Sprintf("Бан пользователя %d пропущен.", userID))
 	default:
 		return c.Edit("Неизвестное действие.")
