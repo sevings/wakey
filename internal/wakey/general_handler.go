@@ -54,12 +54,17 @@ func (gh *GeneralHandler) HandleAction(c tele.Context, action string) error {
 }
 
 func (gh *GeneralHandler) States() []UserState {
-	return []UserState{}
+	return []UserState{StateSuggestActions}
 }
 
 func (gh *GeneralHandler) HandleState(c tele.Context, state UserState) error {
-	gh.log.Errorw("unexpected state for GeneralHandler", "state", state)
-	return c.Edit("Неизвестное действие. Пожалуйста, попробуйте еще раз.")
+	switch state {
+	case StateSuggestActions:
+		return gh.suggestActions(c)
+	default:
+		gh.log.Errorw("unexpected state for GeneralHandler", "state", state)
+		return c.Edit("Неизвестное действие. Пожалуйста, попробуйте еще раз.")
+	}
 }
 
 func createShareLink(botLink string) string {
@@ -75,4 +80,34 @@ func createShareLink(botLink string) string {
 
 	encodedText := url.QueryEscape(sellingText + "\n\n" + botLink)
 	return "https://t.me/share/url?url=" + encodedText
+}
+
+func (gh *GeneralHandler) suggestActions(c tele.Context) error {
+	inlineKeyboard := &tele.ReplyMarkup{}
+
+	btnShowProfile := inlineKeyboard.Data("Показать мой профиль", btnShowProfile)
+	btnChangeName := inlineKeyboard.Data("Изменить имя", btnChangeName)
+	btnChangeBio := inlineKeyboard.Data("Изменить био", btnChangeBio)
+	btnChangeTimezone := inlineKeyboard.Data("Изменить часовой пояс", btnChangeTimezone)
+	btnChangePlans := inlineKeyboard.Data("Изменить планы на завтра", btnChangePlans)
+	btnChangeWakeTime := inlineKeyboard.Data("Изменить время пробуждения", btnChangeWakeTime)
+	btnChangeNotifyTime := inlineKeyboard.Data("Изменить время уведомления", btnChangeNotifyTime)
+	btnSendWish := inlineKeyboard.Data("Отправить пожелание", btnSendWishYes)
+	btnInviteFriends := inlineKeyboard.Data("Пригласить друзей", btnInviteFriends)
+	btnDoNothing := inlineKeyboard.Data("Ничего, до свидания", btnDoNothing)
+
+	inlineKeyboard.Inline(
+		inlineKeyboard.Row(btnShowProfile),
+		inlineKeyboard.Row(btnChangeName),
+		inlineKeyboard.Row(btnChangeBio),
+		inlineKeyboard.Row(btnChangeTimezone),
+		inlineKeyboard.Row(btnChangePlans),
+		inlineKeyboard.Row(btnChangeWakeTime),
+		inlineKeyboard.Row(btnChangeNotifyTime),
+		inlineKeyboard.Row(btnSendWish),
+		inlineKeyboard.Row(btnInviteFriends),
+		inlineKeyboard.Row(btnDoNothing),
+	)
+
+	return c.Send("Что бы вы хотели сделать?", inlineKeyboard)
 }

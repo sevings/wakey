@@ -252,7 +252,7 @@ func (bot *Bot) handleCallback(c tele.Context) error {
 	state, exists := bot.stateManager.GetState(userID)
 	if exists && state == StateSuggestActions {
 		bot.stateManager.ClearState(userID)
-		return bot.suggestActions(c)
+		return bot.handleState(c, state)
 	}
 
 	return nil
@@ -263,13 +263,19 @@ func (bot *Bot) handleText(c tele.Context) error {
 
 	state, exists := bot.stateManager.GetState(userID)
 	if !exists {
-		return bot.suggestActions(c)
+		state = StateSuggestActions
 	}
+
+	return bot.handleState(c, state)
+}
+
+func (bot *Bot) handleState(c tele.Context, state UserState) error {
+	userID := c.Sender().ID
 
 	handler, exists := bot.stateHandlers[state]
 	if !exists {
 		bot.log.Warnw("no handler for state", "state", state)
-		return bot.suggestActions(c)
+		return nil
 	}
 
 	err := handler.HandleState(c, state)
@@ -280,51 +286,14 @@ func (bot *Bot) handleText(c tele.Context) error {
 	state, exists = bot.stateManager.GetState(userID)
 	if exists && state == StateSuggestActions {
 		bot.stateManager.ClearState(userID)
-		return bot.suggestActions(c)
+		return bot.handleState(c, state)
 	}
 
 	return nil
 }
 
-func (bot *Bot) suggestActions(c tele.Context) error {
-	inlineKeyboard := &tele.ReplyMarkup{}
-
-	btnShowProfile := inlineKeyboard.Data("Показать мой профиль", btnShowProfile)
-	btnChangeName := inlineKeyboard.Data("Изменить имя", btnChangeName)
-	btnChangeBio := inlineKeyboard.Data("Изменить био", btnChangeBio)
-	btnChangeTimezone := inlineKeyboard.Data("Изменить часовой пояс", btnChangeTimezone)
-	btnChangePlans := inlineKeyboard.Data("Изменить планы на завтра", btnChangePlans)
-	btnChangeWakeTime := inlineKeyboard.Data("Изменить время пробуждения", btnChangeWakeTime)
-	btnChangeNotifyTime := inlineKeyboard.Data("Изменить время уведомления", btnChangeNotifyTime)
-	btnSendWish := inlineKeyboard.Data("Отправить пожелание", btnSendWishYes)
-	btnInviteFriends := inlineKeyboard.Data("Пригласить друзей", btnInviteFriends)
-	btnDoNothing := inlineKeyboard.Data("Ничего, до свидания", btnDoNothing)
-
-	inlineKeyboard.Inline(
-		inlineKeyboard.Row(btnShowProfile),
-		inlineKeyboard.Row(btnChangeName),
-		inlineKeyboard.Row(btnChangeBio),
-		inlineKeyboard.Row(btnChangeTimezone),
-		inlineKeyboard.Row(btnChangePlans),
-		inlineKeyboard.Row(btnChangeWakeTime),
-		inlineKeyboard.Row(btnChangeNotifyTime),
-		inlineKeyboard.Row(btnSendWish),
-		inlineKeyboard.Row(btnInviteFriends),
-		inlineKeyboard.Row(btnDoNothing),
-	)
-
-	return c.Send("Что бы вы хотели сделать?", inlineKeyboard)
-}
-
 func (bot *Bot) handleStart(c tele.Context) error {
-	state := StateRegistrationStart
-	handler, exists := bot.stateHandlers[state]
-	if !exists {
-		bot.log.Warnw("no handler for state", "state", state)
-		return bot.suggestActions(c)
-	}
-
-	return handler.HandleState(c, state)
+	return bot.handleState(c, StateRegistrationStart)
 }
 
 func parseTime(timeStr string, userTz int32) (time.Time, error) {
