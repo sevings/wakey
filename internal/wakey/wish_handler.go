@@ -188,6 +188,7 @@ func (wh *WishHandler) FindUserForWish(c tele.Context) error {
 	plan, err := wh.db.FindPlanForWish(senderID)
 	if err != nil {
 		if err == ErrNotFound {
+			wh.stateMan.SetState(senderID, StateSuggestActions)
 			return c.Send("К сожалению, сейчас нет пользователей, которым можно отправить пожелание.")
 		}
 		wh.log.Errorw("failed to find user for wish", "error", err)
@@ -210,11 +211,17 @@ func (wh *WishHandler) FindUserForWish(c tele.Context) error {
 	}
 	wh.stateMan.SetUserData(senderID, userData)
 
-	return c.Send(fmt.Sprintf("Отправьте ваше пожелание для этого пользователя:\n\n%s", userInfo))
+	return c.Send(fmt.Sprintf("Отправьте ваше пожелание для этого пользователя или напишите 'пропустить':\n\n%s", userInfo))
 }
 
 func (wh *WishHandler) HandleWishInput(c tele.Context) error {
 	userID := c.Sender().ID
+	wishText := c.Text()
+	if strings.ToLower(wishText) == "пропустить" {
+		wh.stateMan.SetState(userID, StateSuggestActions)
+		return c.Send("Хорошо, мы не будем отправлять ваше пожелание этому пользователю.")
+	}
+
 	userData, _ := wh.stateMan.GetUserData(userID)
 	if userData == nil {
 		return c.Send("Извините, произошла ошибка. Пожалуйста, начните процесс заново.")
@@ -234,7 +241,7 @@ func (wh *WishHandler) HandleWishInput(c tele.Context) error {
 	wish := &Wish{
 		FromID:  userID,
 		PlanID:  userData.TargetPlanID,
-		Content: c.Text(),
+		Content: wishText,
 	}
 
 	if err := wh.db.SaveWish(wish); err != nil {
