@@ -32,6 +32,7 @@ type UserData struct {
 	Bio          string
 	Plans        string
 	TargetPlanID uint
+	AskAboutWish bool
 	LastUpdated  time.Time
 }
 
