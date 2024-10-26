@@ -89,8 +89,12 @@ func (ph *PlanHandler) HandleAction(c tele.Context, action string) error {
 			return c.Send("Произошла ошибка при сохранении ваших планов. Пожалуйста, попробуйте позже.")
 		}
 		ph.scheduleWishSend(plan)
-		ph.stateMan.ClearState(userID)
-		return c.Send("Хорошо, ваши планы и время пробуждения остаются без изменений.")
+		err = c.Send("Хорошо, ваши планы и время пробуждения остаются без изменений.")
+		if err != nil {
+			return err
+		}
+
+		return ph.askAboutWish(c)
 	case btnUpdatePlansID:
 		err := c.Edit(c.Message().Text + "\n\n" + btnUpdatePlansText)
 		if err != nil {
@@ -166,10 +170,38 @@ func (ph *PlanHandler) scheduleWishSend(plan *Plan) {
 	ph.log.Infow("scheduled wish", "planID", plan.ID, "wakeAt", plan.WakeAt)
 }
 
+func (ph *PlanHandler) askAboutWish(c tele.Context) error {
+	userID := c.Sender().ID
+	userData, exists := ph.stateMan.GetUserData(userID)
+	if !exists || !userData.AskAboutWish {
+		ph.stateMan.SetState(userID, StateSuggestActions)
+		return nil
+	}
+
+	if userData.State == StateNone {
+		ph.stateMan.ClearState(userID)
+	} else {
+		userData.AskAboutWish = false
+		ph.stateMan.SetUserData(userID, userData)
+	}
+
+	// Ask if the user wants to send a wish
+	inlineKeyboard := &tele.ReplyMarkup{}
+	btnYes := inlineKeyboard.Data(btnSendWishYesText, btnSendWishYesID)
+	btnNo := inlineKeyboard.Data(btnSendWishNoText, btnSendWishNoID)
+	inlineKeyboard.Inline(
+		inlineKeyboard.Row(btnYes),
+		inlineKeyboard.Row(btnNo),
+	)
+
+	return c.Send("Хотите отправить пожелание другому пользователю?", inlineKeyboard)
+}
+
 func (ph *PlanHandler) HandlePlansInput(c tele.Context) error {
 	userID := c.Sender().ID
 	userData, _ := ph.stateMan.GetUserData(userID)
 	userData.Plans = c.Text()
+	userData.AskAboutWish = true
 	ph.stateMan.SetUserData(userID, userData)
 	ph.stateMan.SetState(userID, StateAwaitingWakeTime)
 	return c.Send("Отлично! Теперь скажите, во сколько вы планируете проснуться завтра? (Используйте формат ЧЧ:ММ)")
@@ -211,16 +243,7 @@ func (ph *PlanHandler) HandleWakeTimeInput(c tele.Context) error {
 		return err
 	}
 
-	// Ask if the user wants to send a wish
-	inlineKeyboard := &tele.ReplyMarkup{}
-	btnYes := inlineKeyboard.Data(btnSendWishYesText, btnSendWishYesID)
-	btnNo := inlineKeyboard.Data(btnSendWishNoText, btnSendWishNoID)
-	inlineKeyboard.Inline(
-		inlineKeyboard.Row(btnYes),
-		inlineKeyboard.Row(btnNo),
-	)
-
-	return c.Send("Хотите отправить пожелание другому пользователю?", inlineKeyboard)
+	return ph.askAboutWish(c)
 }
 
 func (ph *PlanHandler) HandlePlansUpdate(c tele.Context) error {
@@ -252,8 +275,12 @@ func (ph *PlanHandler) HandlePlansUpdate(c tele.Context) error {
 		return c.Send("Извините, произошла ошибка при сохранении ваших планов. Пожалуйста, попробуйте позже.")
 	}
 
-	ph.stateMan.SetState(userID, StateSuggestActions)
-	return c.Send("Ваши планы успешно обновлены.")
+	err = c.Send("Ваши планы успешно обновлены.")
+	if err != nil {
+		return err
+	}
+
+	return ph.askAboutWish(c)
 }
 
 func (ph *PlanHandler) HandleWakeTimeUpdate(c tele.Context) error {
@@ -291,9 +318,13 @@ func (ph *PlanHandler) HandleWakeTimeUpdate(c tele.Context) error {
 		return c.Send("Извините, произошла ошибка при сохранении вашего времени пробуждения. Пожалуйста, попробуйте позже.")
 	}
 
-	ph.stateMan.SetState(userID, StateSuggestActions)
 	ph.wishSched.Schedule(plan.WakeAt, JobID(plan.ID))
-	return c.Send(fmt.Sprintf("Ваше время пробуждения успешно обновлено на %s.", wakeTimeStr))
+	err = c.Send(fmt.Sprintf("Ваше время пробуждения успешно обновлено на %s.", wakeTimeStr))
+	if err != nil {
+		return err
+	}
+
+	return ph.askAboutWish(c)
 }
 
 func (ph *PlanHandler) AskAboutPlans(id JobID) {
@@ -353,6 +384,16 @@ func (ph *PlanHandler) AskAboutPlans(id JobID) {
 	if err != nil {
 		ph.log.Errorw("failed to send plan reminder", "error", err, "userID", userID)
 	}
+
+	userData, exists := ph.stateMan.GetUserData(userID)
+	if exists {
+		userData.AskAboutWish = true
+	} else {
+		userData = &UserData{
+			AskAboutWish: true,
+		}
+	}
+	ph.stateMan.SetUserData(userID, userData)
 
 	// Reschedule for the next day
 	ph.schedulePlanReminder(user)
