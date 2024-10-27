@@ -174,7 +174,7 @@ func (ph *ProfileHandler) HandleShowProfile(c tele.Context) error {
 		"Часовой пояс: UTC%+d\n"+
 		"Время уведомления: %s\n"+
 		"Время пробуждения: %s\n",
-		user.Name, user.Bio, user.Tz/60, localWakeTime, localNotifyTime)
+		user.Name, user.Bio, user.Tz/60, localNotifyTime, localWakeTime)
 
 	if plan != nil {
 		profileMsg += fmt.Sprintf("Текущие планы: %s", plan.Content)
