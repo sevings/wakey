@@ -120,3 +120,68 @@ func TestConcurrency(t *testing.T) {
 	r.Less(executedCount, 100, "Some jobs should have been cancelled")
 	r.Greater(executedCount, 0, "Some jobs should have been executed")
 }
+
+func TestNearestJobExecution(t *testing.T) {
+	r := require.New(t)
+	s := wakey.NewSched(10)
+
+	var mu sync.Mutex
+	executed := make([]wakey.JobID, 0)
+
+	s.SetJobFunc(func(id wakey.JobID) {
+		mu.Lock()
+		executed = append(executed, id)
+		mu.Unlock()
+	})
+
+	s.Start()
+
+	// Schedule jobs in non-chronological order
+	s.Schedule(time.Now().Add(100*time.Millisecond), wakey.JobID(3))
+	s.Schedule(time.Now().Add(50*time.Millisecond), wakey.JobID(2))
+	s.Schedule(time.Now().Add(25*time.Millisecond), wakey.JobID(1))
+
+	time.Sleep(150 * time.Millisecond)
+	s.Stop()
+
+	r.Equal([]wakey.JobID{1, 2, 3}, executed, "Jobs should execute in chronological order")
+}
+
+func TestMultipleJobsSameTime(t *testing.T) {
+	r := require.New(t)
+	s := wakey.NewSched(10)
+
+	var mu sync.Mutex
+	executed := make([]wakey.JobID, 0)
+
+	s.SetJobFunc(func(id wakey.JobID) {
+		mu.Lock()
+		executed = append(executed, id)
+		mu.Unlock()
+	})
+
+	s.Start()
+
+	// Schedule multiple jobs for the same time
+	executionTime := time.Now().Add(50 * time.Millisecond)
+	s.Schedule(executionTime, wakey.JobID(1))
+	s.Schedule(executionTime, wakey.JobID(2))
+	s.Schedule(executionTime, wakey.JobID(3))
+
+	// Schedule one job for later
+	s.Schedule(time.Now().Add(100*time.Millisecond), wakey.JobID(4))
+
+	time.Sleep(150 * time.Millisecond)
+	s.Stop()
+
+	r.Len(executed, 4, "All jobs should have executed")
+
+	// First three jobs should be among IDs 1,2,3 (order not guaranteed)
+	firstThree := executed[:3]
+	r.Contains(firstThree, wakey.JobID(1))
+	r.Contains(firstThree, wakey.JobID(2))
+	r.Contains(firstThree, wakey.JobID(3))
+
+	// Last job should be ID 4
+	r.Equal(wakey.JobID(4), executed[3])
+}
