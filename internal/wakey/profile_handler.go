@@ -104,12 +104,12 @@ func (ph *ProfileHandler) HandleState(c tele.Context, state UserState) error {
 }
 
 func (ph *ProfileHandler) HandleStart(c tele.Context) error {
-	const welcomeMessage = `Я бот, который поможет вам планировать ваш день и обмениваться пожеланиями с другими пользователями. Вот что я умею:
+	const welcomeMessage = `Я бот, который поможет вам анализировать свое состояние и обмениваться пожеланиями с другими пользователями. Вот что я умею:
 
-1. Сохранять ваши ежедневные планы и время пробуждения.
-2. Напоминать вам о необходимости обновить планы каждый вечер.
-3. Позволять вам отправлять пожелания другим пользователям.
-4. Доставлять пожелания от других пользователей в момент вашего пробуждения.
+1. Ежедневно сохранять ваш статус и время пробуждения.
+2. Напоминать вам о необходимости обновить статус каждый вечер.
+3. Отправлять ваши сообщения другим пользователям.
+4. Доставлять сообщения от других пользователей в момент вашего пробуждения.
 
 Надеюсь, мы отлично проведем время вместе!`
 
@@ -132,8 +132,12 @@ func (ph *ProfileHandler) HandleStart(c tele.Context) error {
 	ph.stateMan.SetState(userID, StateAwaitingName)
 	fullMessage := "Добро пожаловать! Давайте зарегистрируем вас. Но сначала, позвольте рассказать о моих возможностях.\n\n"
 	fullMessage += welcomeMessage
-	fullMessage += "\n\nТеперь давайте начнем регистрацию. Как вас зовут?"
-	return c.Send(fullMessage)
+	err = c.Send(fullMessage)
+	if err != nil {
+		return err
+	}
+
+	return c.Send("Теперь давайте начнем регистрацию. Как вас зовут? Можно указать настоящее имя или любое прозвище.")
 }
 
 func (ph *ProfileHandler) HandleShowProfile(c tele.Context) error {
@@ -153,7 +157,7 @@ func (ph *ProfileHandler) HandleShowProfile(c tele.Context) error {
 	plan, err := ph.db.GetLatestPlan(userID)
 	if err != nil && err != ErrNotFound {
 		ph.log.Errorw("failed to load latest plan", "error", err)
-		return c.Send("Извините, произошла ошибка при загрузке ваших планов. Пожалуйста, попробуйте позже.")
+		return c.Send("Извините, произошла ошибка при загрузке вашего статуса. Пожалуйста, попробуйте позже.")
 	}
 
 	userLoc := time.FixedZone("User Timezone", int(user.Tz)*60)
@@ -177,9 +181,9 @@ func (ph *ProfileHandler) HandleShowProfile(c tele.Context) error {
 		user.Name, user.Bio, user.Tz/60, localNotifyTime, localWakeTime)
 
 	if plan != nil {
-		profileMsg += fmt.Sprintf("Текущие планы: %s", plan.Content)
+		profileMsg += fmt.Sprintf("Текущий статус: %s", plan.Content)
 	} else {
-		profileMsg += "Текущие планы: Не установлены"
+		profileMsg += "Текущий статус: Не установлен"
 	}
 
 	ph.stateMan.SetState(userID, StateSuggestActions)
@@ -187,12 +191,17 @@ func (ph *ProfileHandler) HandleShowProfile(c tele.Context) error {
 }
 
 func (ph *ProfileHandler) HandleNameInput(c tele.Context) error {
+	const msg = "Теперь, пожалуйста, расскажите немного о себе. " +
+		"Можете написать, кем работаете или на кого учитесь, " +
+		"как любите проводить свободное время, о чем мечтаете. " +
+		"Что угодно, что поможет другим лучше понять вас как человека и вашу жизнь."
+
 	userID := c.Sender().ID
 	userData, _ := ph.stateMan.GetUserData(userID)
 	userData.Name = c.Text()
 	ph.stateMan.SetUserData(userID, userData)
 	ph.stateMan.SetState(userID, StateAwaitingBio)
-	return c.Send("Приятно познакомиться, " + userData.Name + "! Теперь, пожалуйста, расскажите немного о себе (краткое био).")
+	return c.Send("Приятно познакомиться, " + userData.Name + "! " + msg)
 }
 
 func (ph *ProfileHandler) HandleNameUpdate(c tele.Context) error {
@@ -280,7 +289,7 @@ func (ph *ProfileHandler) HandleTimeInput(c tele.Context) error {
 	}
 
 	ph.stateMan.SetState(userID, StateAwaitingNotificationTime)
-	return c.Send("Отлично! Теперь укажите, в какое время вы хотели бы получать напоминание о планах на следующий день? (Используйте формат ЧЧ:ММ или отправьте 'отключить', чтобы отключить уведомления)")
+	return c.Send("Отлично! Теперь укажите, в какое время вы хотели бы получать напоминание обновить статус? (Используйте формат ЧЧ:ММ или отправьте 'отключить', чтобы отключить уведомления)")
 }
 
 func (ph *ProfileHandler) HandleTimezoneUpdate(c tele.Context) error {

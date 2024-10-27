@@ -99,7 +99,7 @@ func (h *AdminHandler) HandleBanCallback(c tele.Context) error {
 		}
 
 		// Notify the banned user
-		banMessage := "Вы были забанены за нарушение правил использования бота. Вы больше не сможете отправлять или получать пожелания."
+		banMessage := "Вы были забанены за нарушение правил использования бота. Вы больше не сможете отправлять или получать сообщения."
 		_, err = h.api.Send(tele.ChatID(userID), banMessage)
 		if err != nil {
 			h.log.Errorw("failed to send ban notification to user", "error", err, "userID", userID)

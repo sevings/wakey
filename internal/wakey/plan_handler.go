@@ -27,7 +27,7 @@ func NewPlanHandler(db *DB, planSched, wishSched Scheduler, stateMan *StateManag
 		log:       log,
 	}
 
-	planSched.SetJobFunc(ph.AskAboutPlans)
+	planSched.SetJobFunc(ph.notifyAboutPlansUpdate)
 	ph.ScheduleAllNotifications()
 
 	return ph
@@ -59,7 +59,7 @@ func (ph *PlanHandler) HandleAction(c tele.Context, action string) error {
 		}
 
 		ph.stateMan.SetState(userID, StateUpdatingPlans)
-		return c.Send("Пожалуйста, введите ваши новые планы на завтра.")
+		return ph.askAboutPlans(c)
 	case btnChangeWakeTimeID:
 		err := c.Edit(c.Message().Text + "\n\n" + btnChangeWakeTimeText)
 		if err != nil {
@@ -86,10 +86,10 @@ func (ph *PlanHandler) HandleAction(c tele.Context, action string) error {
 		plan, err := ph.db.CopyPlanForNextDay(userID)
 		if err != nil {
 			ph.log.Errorw("failed to copy plan for next day", "error", err, "userID", userID)
-			return c.Send("Произошла ошибка при сохранении ваших планов. Пожалуйста, попробуйте позже.")
+			return c.Send("Произошла ошибка при сохранении вашего статуса. Пожалуйста, попробуйте позже.")
 		}
 		ph.scheduleWishSend(plan)
-		err = c.Send("Хорошо, ваши планы и время пробуждения остаются без изменений.")
+		err = c.Send("Хорошо, ваши статус и время пробуждения остаются без изменений.")
 		if err != nil {
 			return err
 		}
@@ -102,7 +102,7 @@ func (ph *PlanHandler) HandleAction(c tele.Context, action string) error {
 		}
 
 		ph.stateMan.SetState(userID, StateAwaitingPlans)
-		return c.Send("Пожалуйста, расскажите о ваших новых планах на завтра.")
+		return ph.askAboutPlans(c)
 	case btnNoWishID:
 		err := c.Edit(c.Message().Text + "\n\n" + btnNoWishText)
 		if err != nil {
@@ -110,7 +110,7 @@ func (ph *PlanHandler) HandleAction(c tele.Context, action string) error {
 		}
 
 		ph.stateMan.ClearState(userID)
-		return c.Send("Хорошо, вы не получите пожелание завтра.")
+		return c.Send("Хорошо, завтра вы не получите сообщение от другого пользователя.")
 	default:
 		ph.log.Errorw("unexpected action for PlanHandler", "action", action)
 		return c.Send("Неизвестное действие. Пожалуйста, попробуйте еще раз.")
@@ -170,6 +170,21 @@ func (ph *PlanHandler) scheduleWishSend(plan *Plan) {
 	ph.log.Infow("scheduled wish", "planID", plan.ID, "wakeAt", plan.WakeAt)
 }
 
+func (ph *PlanHandler) askAboutPlans(c tele.Context) error {
+	const caption = "Пожалуйста, расскажите кратко о своем состоянии в текущий момент. " +
+		"Можете написать о своих чувствах, свои мысли, о сегодняшнем дне, " +
+		"о планах на завтра — все, что вам сейчас важно. Форма свободная, " +
+		"главное — внимание на себя.\n\n" +
+		"Можно, хотя и не обязательно, использовать прикрепленные списки чувств и потребностей."
+
+	album := tele.Album{
+		&tele.Photo{File: tele.FromDisk("./data/feelings.png"), Caption: caption},
+		&tele.Photo{File: tele.FromDisk("./data/needs.png")},
+	}
+
+	return c.SendAlbum(album)
+}
+
 func (ph *PlanHandler) askAboutWish(c tele.Context) error {
 	userID := c.Sender().ID
 	userData, exists := ph.stateMan.GetUserData(userID)
@@ -194,7 +209,7 @@ func (ph *PlanHandler) askAboutWish(c tele.Context) error {
 		inlineKeyboard.Row(btnNo),
 	)
 
-	return c.Send("Хотите отправить пожелание другому пользователю?", inlineKeyboard)
+	return c.Send("Хотите отправить сообщение другому пользователю?", inlineKeyboard)
 }
 
 func (ph *PlanHandler) HandlePlansInput(c tele.Context) error {
@@ -272,10 +287,10 @@ func (ph *PlanHandler) HandlePlansUpdate(c tele.Context) error {
 
 	if err := ph.db.SavePlan(plan); err != nil {
 		ph.log.Errorw("failed to save plan", "error", err)
-		return c.Send("Извините, произошла ошибка при сохранении ваших планов. Пожалуйста, попробуйте позже.")
+		return c.Send("Извините, произошла ошибка при сохранении вашего статуса. Пожалуйста, попробуйте позже.")
 	}
 
-	err = c.Send("Ваши планы успешно обновлены.")
+	err = c.Send("Ваш статус успешно обновлен.")
 	if err != nil {
 		return err
 	}
@@ -327,7 +342,7 @@ func (ph *PlanHandler) HandleWakeTimeUpdate(c tele.Context) error {
 	return ph.askAboutWish(c)
 }
 
-func (ph *PlanHandler) AskAboutPlans(id JobID) {
+func (ph *PlanHandler) notifyAboutPlansUpdate(id JobID) {
 	userID := int64(id)
 	user, err := ph.db.GetUserByID(userID)
 	if err != nil {
@@ -343,17 +358,16 @@ func (ph *PlanHandler) AskAboutPlans(id JobID) {
 	}
 
 	// Show previous plans first
-	previousPlansMsg := "Пора рассказать о ваших планах на завтра! "
+	previousPlansMsg := "Пора рассказать о вашем текущем состоянии! "
 	if err == ErrNotFound || plan == nil {
-		previousPlansMsg += "У вас пока нет сохраненных планов."
+		previousPlansMsg += "У вас пока нет сохраненного статуса."
 	} else {
 		// Convert UTC wake time to user's timezone
 		userLoc := time.FixedZone("User Timezone", int(user.Tz)*60)
 		localWakeTime := plan.WakeAt.In(userLoc)
 		previousPlansMsg += fmt.Sprintf(
-			"Ваши текущие планы:\n"+
-				"🎯 Планы: %s\n"+
-				"⏰ Время пробуждения: %s",
+			"Ваш текущий статус: %s\n\n"+
+				"Время пробуждения: %s",
 			plan.Content,
 			localWakeTime.Format("15:04"))
 	}
@@ -429,9 +443,9 @@ func (ph *PlanHandler) HandleNotificationTimeInput(c tele.Context) error {
 	// Inform user about notification settings
 	var notificationMsg string
 	if user.NotifyAt.IsZero() {
-		notificationMsg = "Уведомления о планах отключены."
+		notificationMsg = "Уведомления о статусе отключены."
 	} else {
-		notificationMsg = fmt.Sprintf("Я буду напоминать вам о планах каждый день в %s.", notificationTimeStr)
+		notificationMsg = fmt.Sprintf("Я буду напоминать вам обновить статус каждый день в %s.", notificationTimeStr)
 	}
 
 	err = c.Send(fmt.Sprintf("Отлично! Регистрация завершена. %s", notificationMsg))
@@ -440,7 +454,7 @@ func (ph *PlanHandler) HandleNotificationTimeInput(c tele.Context) error {
 	}
 
 	ph.stateMan.SetState(userID, StateAwaitingPlans)
-	return c.Send("Теперь расскажите о ваших планах на завтра.")
+	return ph.askAboutPlans(c)
 }
 
 func (ph *PlanHandler) HandleNotificationTimeUpdate(c tele.Context) error {
@@ -472,7 +486,7 @@ func (ph *PlanHandler) HandleNotificationTimeUpdate(c tele.Context) error {
 	ph.stateMan.SetState(userID, StateSuggestActions)
 
 	if user.NotifyAt.IsZero() {
-		return c.Send("Уведомления о планах отключены.")
+		return c.Send("Уведомления о статусе отключены.")
 	}
 
 	return c.Send(fmt.Sprintf("Ваше время уведомления успешно обновлено на %s.", notificationTimeStr))

@@ -63,11 +63,11 @@ func (wh *WishHandler) HandleAction(c tele.Context, action string) error {
 		}
 		wishID, err := strconv.ParseUint(data[1], 10, 64)
 		if err != nil {
-			return c.Send("Неверный ID пожелания.")
+			return c.Send("Неверный ID сообщения.")
 		}
 		wish, err := wh.db.GetWishByID(uint(wishID))
 		if err != nil {
-			return c.Send("Не удалось найти пожелание.")
+			return c.Send("Не удалось найти сообщение.")
 		}
 		if action == btnWishLikeID {
 			return wh.HandleWishLike(c, wish)
@@ -110,7 +110,7 @@ func (wh *WishHandler) HandleWishLike(c tele.Context, wish *Wish) error {
 	}
 
 	// Send message to the wish author
-	thanksMsg := fmt.Sprintf("Пользователю %s понравилось ваше пожелание.", user.Name)
+	thanksMsg := fmt.Sprintf("Пользователю %s понравилось ваше сообщение.", user.Name)
 	_, err = wh.api.Send(tele.ChatID(wish.FromID), thanksMsg)
 	if err != nil {
 		wh.log.Errorw("failed to send thanks message", "error", err, "userID", wish.FromID)
@@ -121,7 +121,7 @@ func (wh *WishHandler) HandleWishLike(c tele.Context, wish *Wish) error {
 		return err
 	}
 
-	return c.Send("Благодарность за пожелание отправлена.")
+	return c.Send("Благодарность за сообщение отправлена.")
 }
 
 func (wh *WishHandler) HandleWishDislike(c tele.Context) error {
@@ -135,7 +135,7 @@ func (wh *WishHandler) HandleWishDislike(c tele.Context) error {
 
 func (wh *WishHandler) HandleWishReport(c tele.Context, wish *Wish) error {
 	if wh.adm != 0 {
-		reportMsg := fmt.Sprintf("Жалоба на пожелание:\n\nАвтор ID: %d\nТекст пожелания: %s", wish.FromID, wish.Content)
+		reportMsg := fmt.Sprintf("Жалоба на сообщение:\n\nАвтор ID: %d\nТекст сообщения: %s", wish.FromID, wish.Content)
 
 		inlineKeyboard := &tele.ReplyMarkup{}
 		btnBan := inlineKeyboard.Data(btnBanUserText, btnBanUserID, fmt.Sprintf("%d", wish.FromID))
@@ -155,7 +155,7 @@ func (wh *WishHandler) HandleWishReport(c tele.Context, wish *Wish) error {
 		return err
 	}
 
-	return c.Send("Жалоба на пожелание отправлена.")
+	return c.Send("Жалоба на сообщение отправлена.")
 }
 
 func (wh *WishHandler) HandleSendWishResponse(c tele.Context) error {
@@ -164,7 +164,7 @@ func (wh *WishHandler) HandleSendWishResponse(c tele.Context) error {
 		return err
 	}
 
-	err = c.Send("Хорошо, давайте отправим пожелание!")
+	err = c.Send("Хорошо, давайте отправим сообщение!")
 	if err != nil {
 		return err
 	}
@@ -189,7 +189,7 @@ func (wh *WishHandler) FindUserForWish(c tele.Context) error {
 	if err != nil {
 		if err == ErrNotFound {
 			wh.stateMan.SetState(senderID, StateSuggestActions)
-			return c.Send("К сожалению, сейчас нет пользователей, которым можно отправить пожелание.")
+			return c.Send("К сожалению, сейчас нет пользователей, которым можно отправить сообщение.")
 		}
 		wh.log.Errorw("failed to find user for wish", "error", err)
 		return c.Send("Извините, произошла ошибка. Пожалуйста, попробуйте позже.")
@@ -201,9 +201,6 @@ func (wh *WishHandler) FindUserForWish(c tele.Context) error {
 		return c.Send("Извините, произошла ошибка. Пожалуйста, попробуйте позже.")
 	}
 
-	userInfo := fmt.Sprintf("Имя: %s\nО себе: %s\nПланы: %s",
-		user.Name, user.Bio, plan.Content)
-
 	// Set user state and data
 	userData := &UserData{
 		State:        StateAwaitingWish,
@@ -211,7 +208,17 @@ func (wh *WishHandler) FindUserForWish(c tele.Context) error {
 	}
 	wh.stateMan.SetUserData(senderID, userData)
 
-	return c.Send(fmt.Sprintf("Отправьте ваше пожелание для этого пользователя или напишите 'пропустить':\n\n%s", userInfo))
+	const msg = "Напишите сообщение этому пользователю.\n\n" +
+		"Можете поддержать, пожелать что-нибудь доброе, поделиться мыслями. " +
+		"Уважайте друг друга. " +
+		"Постарайтесь не давать советов и оценок, если об этом явно не попросили.\n\n" +
+		"Если совсем не хочется ничего писать, отправьте 'пропустить'."
+	err = c.Send(msg)
+	if err != nil {
+		return err
+	}
+
+	return c.Send(fmt.Sprintf("%s\n\n%s\n\n%s", user.Name, user.Bio, plan.Content))
 }
 
 func (wh *WishHandler) HandleWishInput(c tele.Context) error {
@@ -219,7 +226,7 @@ func (wh *WishHandler) HandleWishInput(c tele.Context) error {
 	wishText := c.Text()
 	if strings.ToLower(wishText) == "пропустить" {
 		wh.stateMan.SetState(userID, StateSuggestActions)
-		return c.Send("Хорошо, мы не будем отправлять ваше пожелание этому пользователю.")
+		return c.Send("Хорошо, мы не будем отправлять ваше сообщение этому пользователю.")
 	}
 
 	userData, _ := wh.stateMan.GetUserData(userID)
@@ -235,7 +242,7 @@ func (wh *WishHandler) HandleWishInput(c tele.Context) error {
 
 	if time.Now().UTC().Sub(plan.OfferedAt) > time.Hour {
 		wh.stateMan.ClearState(userID)
-		return c.Send("Извините, время для отправки пожелания истекло. Пожалуйста, попробуйте отправить новое пожелание.")
+		return c.Send("Извините, время для отправки сообщения этому пользователю истекло. Пожалуйста, попробуйте отправить новое сообщение.")
 	}
 
 	wish := &Wish{
@@ -246,11 +253,11 @@ func (wh *WishHandler) HandleWishInput(c tele.Context) error {
 
 	if err := wh.db.SaveWish(wish); err != nil {
 		wh.log.Errorw("failed to save wish", "error", err)
-		return c.Send("Извините, произошла ошибка при сохранении вашего пожелания. Пожалуйста, попробуйте позже.")
+		return c.Send("Извините, произошла ошибка при сохранении вашего сообщения. Пожалуйста, попробуйте позже.")
 	}
 
 	wh.stateMan.SetState(userID, StateSuggestActions)
-	return c.Send("Спасибо! Ваше пожелание отправлено и будет доставлено пользователю в запланированное время.")
+	return c.Send("Спасибо! Ваше сообщение отправлено и будет доставлено пользователю в запланированное время.")
 }
 
 func (wh *WishHandler) SendWishes(id JobID) {
@@ -285,10 +292,13 @@ func (wh *WishHandler) SendWishes(id JobID) {
 		return
 	}
 
+	_, err = wh.api.Send(tele.ChatID(plan.UserID), "Доброе утро! Вот, что вам сегодня написали:")
+	if err != nil {
+		wh.log.Errorw("failed to send wish", "error", err, "userID", plan.UserID)
+	}
+
 	// Send each wish to the recipient
 	for _, wish := range wishes {
-		message := fmt.Sprintf("Доброе утро! Вот пожелание для вас:\n\n%s", wish.Content)
-
 		// Create inline keyboard
 		inlineKeyboard := &tele.ReplyMarkup{}
 		btnLike := inlineKeyboard.Data(btnWishLikeText, btnWishLikeID, fmt.Sprintf("%d", wish.ID))
@@ -301,7 +311,7 @@ func (wh *WishHandler) SendWishes(id JobID) {
 		)
 
 		// Send message with inline keyboard
-		_, err = wh.api.Send(tele.ChatID(plan.UserID), message, inlineKeyboard)
+		_, err = wh.api.Send(tele.ChatID(plan.UserID), wish.Content, inlineKeyboard)
 		if err != nil {
 			wh.log.Errorw("failed to send wish", "error", err, "userID", plan.UserID, "wishID", wish.ID)
 		}
