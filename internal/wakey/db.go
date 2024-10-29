@@ -44,6 +44,18 @@ type Wish struct {
 	Content string
 }
 
+type Stats struct {
+	TotalUsers  int64
+	TotalPlans  int64
+	TotalWishes int64
+
+	NewUsersLast7Days    int64
+	ActiveUsersLast7Days int64
+
+	AvgPlansLast7Days  float64
+	AvgWishesLast7Days float64
+}
+
 func LoadDatabase(path string) (*DB, bool) {
 	log := zap.L().Named("db").Sugar()
 	db, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
@@ -62,6 +74,74 @@ func LoadDatabase(path string) (*DB, bool) {
 		db:  db,
 		log: log,
 	}, true
+}
+
+func (db *DB) GetStats() (*Stats, error) {
+	stats := &Stats{}
+
+	// Get total counts
+	err := db.db.Model(&User{}).Count(&stats.TotalUsers).Error
+	if err != nil {
+		return nil, err
+	}
+
+	err = db.db.Model(&Plan{}).Count(&stats.TotalPlans).Error
+	if err != nil {
+		return nil, err
+	}
+
+	err = db.db.Model(&Wish{}).Count(&stats.TotalWishes).Error
+	if err != nil {
+		return nil, err
+	}
+
+	// Get new users in last 7 days
+	sevenDaysAgo := time.Now().UTC().AddDate(0, 0, -7)
+	err = db.db.Model(&User{}).
+		Where("created_at >= ?", sevenDaysAgo).
+		Count(&stats.NewUsersLast7Days).Error
+	if err != nil {
+		return nil, err
+	}
+
+	// Get active users (users with plans or wishes) in last 7 days
+	var activeUsers int64
+	err = db.db.Model(&User{}).
+		Where("id IN (?)",
+			db.db.Model(&Plan{}).
+				Select("user_id").
+				Where("created_at >= ?", sevenDaysAgo),
+		).Or("id IN (?)",
+		db.db.Model(&Wish{}).
+			Select("from_id").
+			Where("created_at >= ?", sevenDaysAgo),
+	).Count(&activeUsers).Error
+	if err != nil {
+		return nil, err
+	}
+	stats.ActiveUsersLast7Days = activeUsers
+
+	// Get average plans per day for last 7 days
+	var plansLast7Days int64
+	err = db.db.Model(&Plan{}).
+		Where("created_at >= ?", sevenDaysAgo).
+		Count(&plansLast7Days).Error
+	if err != nil {
+		return nil, err
+	}
+	stats.AvgPlansLast7Days = float64(plansLast7Days) / 7.0
+
+	// Get average wishes per day for last 7 days
+	var wishesLast7Days int64
+	err = db.db.Model(&Wish{}).
+		Where("created_at >= ?", sevenDaysAgo).
+		Count(&wishesLast7Days).Error
+	if err != nil {
+		return nil, err
+	}
+	stats.AvgWishesLast7Days = float64(wishesLast7Days) / 7.0
+
+	return stats, nil
 }
 
 func (db *DB) CreateUser(user *User) error {

@@ -392,3 +392,72 @@ func TestGetFuturePlans(t *testing.T) {
 	require.True(t, futureContents["Future Plan 1"])
 	require.True(t, futureContents["Future Plan 2"])
 }
+
+func TestGetStats(t *testing.T) {
+	db := setupTestDB(t)
+
+	// Create test users
+	users := []*wakey.User{
+		{ID: 30, Name: "Stats User 1"},
+		{ID: 31, Name: "Stats User 2"},
+		{ID: 32, Name: "Stats User 3"},
+	}
+	for _, user := range users {
+		err := db.CreateUser(user)
+		require.NoError(t, err)
+	}
+
+	// Create some plans
+	plans := []*wakey.Plan{
+		{
+			UserID:  30,
+			Content: "Stats Plan 1",
+			WakeAt:  time.Now().Add(24 * time.Hour),
+		},
+		{
+			UserID:  31,
+			Content: "Stats Plan 2",
+			WakeAt:  time.Now().Add(48 * time.Hour),
+		},
+	}
+	for _, plan := range plans {
+		err := db.SavePlan(plan)
+		require.NoError(t, err)
+	}
+
+	// Create some wishes
+	wishes := []*wakey.Wish{
+		{
+			FromID:  32,
+			PlanID:  plans[0].ID,
+			Content: "Stats Wish 1",
+		},
+		{
+			FromID:  31,
+			PlanID:  plans[0].ID,
+			Content: "Stats Wish 2",
+		},
+	}
+	for _, wish := range wishes {
+		err := db.SaveWish(wish)
+		require.NoError(t, err)
+	}
+
+	// Get stats
+	stats, err := db.GetStats()
+	require.NoError(t, err)
+	require.NotNil(t, stats)
+
+	// Verify counts
+	require.Equal(t, int64(3), stats.TotalUsers)
+	require.Equal(t, int64(2), stats.TotalPlans)
+	require.Equal(t, int64(2), stats.TotalWishes)
+
+	// All users are new and active in last 7 days
+	require.Equal(t, int64(3), stats.NewUsersLast7Days)
+	require.Equal(t, int64(3), stats.ActiveUsersLast7Days)
+
+	// Average plans and wishes per day
+	require.InDelta(t, 2.0/7.0, stats.AvgPlansLast7Days, 0.001)
+	require.InDelta(t, 2.0/7.0, stats.AvgWishesLast7Days, 0.001)
+}

@@ -25,6 +25,7 @@ const (
 	StateUpdatingNotificationTime
 	StateSuggestActions
 	StateCancelAction
+	StatePrintStats
 )
 
 type UserData struct {

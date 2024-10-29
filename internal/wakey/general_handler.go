@@ -71,7 +71,7 @@ func (gh *GeneralHandler) HandleAction(c tele.Context, action string) error {
 }
 
 func (gh *GeneralHandler) States() []UserState {
-	return []UserState{StateSuggestActions, StateCancelAction}
+	return []UserState{StateSuggestActions, StateCancelAction, StatePrintStats}
 }
 
 func (gh *GeneralHandler) HandleState(c tele.Context, state UserState) error {
@@ -80,6 +80,8 @@ func (gh *GeneralHandler) HandleState(c tele.Context, state UserState) error {
 		return gh.suggestActions(c)
 	case StateCancelAction:
 		return gh.cancelAction(c)
+	case StatePrintStats:
+		return gh.printStats(c)
 	default:
 		gh.log.Errorw("unexpected state for GeneralHandler", "state", state)
 		return c.Send("Неизвестное действие. Пожалуйста, попробуйте еще раз.")
@@ -143,4 +145,35 @@ func (gh *GeneralHandler) cancelAction(c tele.Context) error {
 	}
 
 	return gh.suggestActions(c)
+}
+
+func (gh *GeneralHandler) printStats(c tele.Context) error {
+	stats, err := gh.db.GetStats()
+	if err != nil {
+		gh.log.Errorw("failed to get stats", "error", err)
+		return c.Send("Извините, не удалось получить статистику. Пожалуйста, попробуйте позже.")
+	}
+
+	message := fmt.Sprintf(`📊 *Статистика бота*
+
+*Общая статистика:*
+• Всего пользователей: %d
+• Всего планов: %d
+• Всего пожеланий: %d
+
+*За последние 7 дней:*
+• Новых пользователей: %d
+• Активных пользователей: %d
+• Среднее число планов в день: %.2f
+• Среднее число пожеланий в день: %.2f`,
+		stats.TotalUsers,
+		stats.TotalPlans,
+		stats.TotalWishes,
+		stats.NewUsersLast7Days,
+		stats.ActiveUsersLast7Days,
+		stats.AvgPlansLast7Days,
+		stats.AvgWishesLast7Days,
+	)
+
+	return c.Send(message, tele.ModeMarkdown)
 }
