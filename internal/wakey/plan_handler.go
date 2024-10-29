@@ -333,7 +333,7 @@ func (ph *PlanHandler) HandleWakeTimeUpdate(c tele.Context) error {
 		return c.Send("Извините, произошла ошибка при сохранении вашего времени пробуждения. Пожалуйста, попробуйте позже.")
 	}
 
-	ph.wishSched.Schedule(plan.WakeAt, JobID(plan.ID))
+	ph.scheduleWishSend(plan)
 	err = c.Send(fmt.Sprintf("Ваше время пробуждения успешно обновлено на %s.", wakeTimeStr))
 	if err != nil {
 		return err
@@ -358,16 +358,16 @@ func (ph *PlanHandler) notifyAboutPlansUpdate(id JobID) {
 	}
 
 	// Show previous plans first
-	previousPlansMsg := "Пора рассказать о вашем текущем состоянии! "
+	previousPlansMsg := "Пора рассказать о вашем текущем состоянии!"
 	if err == ErrNotFound || plan == nil {
-		previousPlansMsg += "У вас пока нет сохраненного статуса."
+		previousPlansMsg += "\n\nУ вас пока нет сохраненного статуса."
 	} else {
 		// Convert UTC wake time to user's timezone
 		userLoc := time.FixedZone("User Timezone", int(user.Tz)*60)
 		localWakeTime := plan.WakeAt.In(userLoc)
 		previousPlansMsg += fmt.Sprintf(
-			"Ваш текущий статус: %s\n\n"+
-				"Время пробуждения: %s",
+			"\n\nВаш текущий статус: %s"+
+				"\n\nВремя пробуждения: %s",
 			plan.Content,
 			localWakeTime.Format("15:04"))
 	}

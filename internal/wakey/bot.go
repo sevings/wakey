@@ -76,13 +76,13 @@ const (
 )
 
 const (
-	btnWishLikeText         = "♥ Спасибо, понравилось!"
+	btnWishLikeText         = "♥ Спасибо, приятно!"
 	btnWishDislikeText      = "😐 Ну такое…"
 	btnWishReportText       = "🙎 Это даже обидно"
 	btnSendWishYesText      = "💌 Отправить сообщение"
-	btnSendWishNoText       = "❌ Может, в другой раз"
+	btnSendWishNoText       = "❌ Не сейчас"
 	btnKeepPlansText        = "👌 Оставить как есть"
-	btnUpdatePlansText      = "✍ Обновить статус"
+	btnUpdatePlansText      = "✍ Изменить статус и время"
 	btnNoWishText           = "🚫 Не получать сообщение"
 	btnShowProfileText      = "👤 Показать мой профиль"
 	btnChangeNameText       = "📝 Изменить имя"

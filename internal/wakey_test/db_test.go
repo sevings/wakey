@@ -125,6 +125,7 @@ func TestPlanOperations(t *testing.T) {
 	}
 
 	err = db.SavePlan(plan)
+	require.NotZero(t, plan.ID)
 	require.NoError(t, err)
 
 	fetchedPlan, err := db.GetLatestPlan(2)
@@ -155,6 +156,7 @@ func TestCopyPlanForNextDay(t *testing.T) {
 	latestPlan, err := db.CopyPlanForNextDay(3)
 	require.NoError(t, err)
 	require.NotNil(t, latestPlan)
+	require.NotZero(t, latestPlan.ID)
 	require.Equal(t, pastPlan.Content, latestPlan.Content)
 	require.True(t, latestPlan.WakeAt.After(time.Now()))
 
