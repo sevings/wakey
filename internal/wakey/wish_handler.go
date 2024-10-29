@@ -138,10 +138,13 @@ func (wh *WishHandler) HandleWishReport(c tele.Context, wish *Wish) error {
 		reportMsg := fmt.Sprintf("Жалоба на сообщение:\n\nАвтор ID: %d\nТекст сообщения: %s", wish.FromID, wish.Content)
 
 		inlineKeyboard := &tele.ReplyMarkup{}
+		btnWarn := inlineKeyboard.Data(btnWarnUserText, btnWarnUserID, fmt.Sprintf("%d", wish.FromID))
 		btnBan := inlineKeyboard.Data(btnBanUserText, btnBanUserID, fmt.Sprintf("%d", wish.FromID))
 		btnSkip := inlineKeyboard.Data(btnSkipBanText, btnSkipBanID, fmt.Sprintf("%d", wish.FromID))
 		inlineKeyboard.Inline(
-			inlineKeyboard.Row(btnBan, btnSkip),
+			inlineKeyboard.Row(btnWarn),
+			inlineKeyboard.Row(btnBan),
+			inlineKeyboard.Row(btnSkip),
 		)
 
 		_, err := wh.api.Send(tele.ChatID(wh.adm), reportMsg, inlineKeyboard)

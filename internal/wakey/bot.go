@@ -71,6 +71,7 @@ const (
 	btnInviteFriendsID    = "invite_friends"
 	btnDoNothingID        = "do_nothing"
 	btnShowLinkID         = "show_link"
+	btnWarnUserID         = "warn_user"
 	btnBanUserID          = "ban_user"
 	btnSkipBanID          = "skip_ban"
 )
@@ -95,6 +96,7 @@ const (
 	btnDoNothingText        = "🤷‍♂️ Ничего, до свидания"
 	btnShowLinkText         = "🔗 Показать ссылку"
 	btnShareLinkText        = "📤 Поделиться ссылкой"
+	btnWarnUserText         = "⚠️ Отправить предупреждение"
 	btnBanUserText          = "🚫 Забанить пользователя"
 	btnSkipBanText          = "⏭️ Пропустить"
 )
