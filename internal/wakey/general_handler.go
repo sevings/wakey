@@ -9,16 +9,18 @@ import (
 )
 
 type GeneralHandler struct {
-	db   *DB
-	log  *zap.SugaredLogger
-	name string
+	db       *DB
+	stateMan *StateManager
+	log      *zap.SugaredLogger
+	name     string
 }
 
-func NewGeneralHandler(db *DB, log *zap.SugaredLogger, botName string) *GeneralHandler {
+func NewGeneralHandler(db *DB, stateMan *StateManager, log *zap.SugaredLogger, botName string) *GeneralHandler {
 	return &GeneralHandler{
-		db:   db,
-		log:  log,
-		name: botName,
+		db:       db,
+		stateMan: stateMan,
+		log:      log,
+		name:     botName,
 	}
 }
 
@@ -69,13 +71,15 @@ func (gh *GeneralHandler) HandleAction(c tele.Context, action string) error {
 }
 
 func (gh *GeneralHandler) States() []UserState {
-	return []UserState{StateSuggestActions}
+	return []UserState{StateSuggestActions, StateCancelAction}
 }
 
 func (gh *GeneralHandler) HandleState(c tele.Context, state UserState) error {
 	switch state {
 	case StateSuggestActions:
 		return gh.suggestActions(c)
+	case StateCancelAction:
+		return gh.cancelAction(c)
 	default:
 		gh.log.Errorw("unexpected state for GeneralHandler", "state", state)
 		return c.Send("Неизвестное действие. Пожалуйста, попробуйте еще раз.")
@@ -96,6 +100,9 @@ func createShareLink(botLink string) string {
 }
 
 func (gh *GeneralHandler) suggestActions(c tele.Context) error {
+	userID := c.Sender().ID
+	gh.stateMan.ClearState(userID)
+
 	inlineKeyboard := &tele.ReplyMarkup{}
 
 	btnShowProfile := inlineKeyboard.Data(btnShowProfileText, btnShowProfileID)
@@ -123,4 +130,17 @@ func (gh *GeneralHandler) suggestActions(c tele.Context) error {
 	)
 
 	return c.Send("Что бы вы хотели сделать?", inlineKeyboard)
+}
+
+func (gh *GeneralHandler) cancelAction(c tele.Context) error {
+	userID := c.Sender().ID
+	state, exists := gh.stateMan.GetState(userID)
+	if exists && state != StateNone {
+		err := c.Send("Действие отменено.")
+		if err != nil {
+			return err
+		}
+	}
+
+	return gh.suggestActions(c)
 }

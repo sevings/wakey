@@ -215,7 +215,7 @@ func (wh *WishHandler) FindUserForWish(c tele.Context) error {
 		"Можете поддержать, пожелать что-нибудь доброе, поделиться мыслями. " +
 		"Уважайте друг друга. " +
 		"Постарайтесь не давать советов и оценок, если об этом явно не попросили.\n\n" +
-		"Если совсем не хочется ничего писать, отправьте 'пропустить'."
+		"Если совсем не хочется ничего писать, используйте команду /cancel."
 	err = c.Send(msg)
 	if err != nil {
 		return err
@@ -227,11 +227,6 @@ func (wh *WishHandler) FindUserForWish(c tele.Context) error {
 func (wh *WishHandler) HandleWishInput(c tele.Context) error {
 	userID := c.Sender().ID
 	wishText := c.Text()
-	if strings.ToLower(wishText) == "пропустить" {
-		wh.stateMan.SetState(userID, StateSuggestActions)
-		return c.Send("Хорошо, мы не будем отправлять ваше сообщение этому пользователю.")
-	}
-
 	userData, _ := wh.stateMan.GetUserData(userID)
 	if userData == nil {
 		return c.Send("Извините, произошла ошибка. Пожалуйста, начните процесс заново.")

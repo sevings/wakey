@@ -67,7 +67,7 @@ func (ph *PlanHandler) HandleAction(c tele.Context, action string) error {
 		}
 
 		ph.stateMan.SetState(userID, StateUpdatingWakeTime)
-		return c.Send("Пожалуйста, введите новое время пробуждения в формате ЧЧ:ММ.")
+		return c.Send("Пожалуйста, введите новое время пробуждения в формате ЧЧ:ММ. Используйте команду /cancel для отмены.")
 	case btnChangeNotifyTimeID:
 		err := c.Edit(c.Message().Text + "\n\n" + btnChangeNotifyTimeText)
 		if err != nil {
@@ -76,7 +76,8 @@ func (ph *PlanHandler) HandleAction(c tele.Context, action string) error {
 
 		ph.stateMan.SetState(userID, StateUpdatingNotificationTime)
 		return c.Send("Пожалуйста, введите новое время уведомления в формате ЧЧ:ММ. " +
-			"Если вы хотите отключить уведомления, отправьте 'отключить'.")
+			"Если вы хотите отключить уведомления, отправьте 'отключить'.\n" +
+			"Или используйте команду /cancel для отмены.")
 	case btnKeepPlansID:
 		err := c.Edit(c.Message().Text + "\n\n" + btnKeepPlansText)
 		if err != nil {
@@ -175,7 +176,8 @@ func (ph *PlanHandler) askAboutPlans(c tele.Context) error {
 		"Можете написать о своих чувствах, свои мысли, о сегодняшнем дне, " +
 		"о планах на завтра — все, что вам сейчас важно. Форма свободная, " +
 		"главное — внимание на себя.\n\n" +
-		"Можно, хотя и не обязательно, использовать прикрепленные списки чувств и потребностей."
+		"Можно, хотя и не обязательно, использовать прикрепленные списки чувств и потребностей.\n" +
+		"Или отправьте команду /cancel для отмены."
 
 	album := tele.Album{
 		&tele.Photo{File: tele.FromDisk("./data/feelings.png"), Caption: caption},
