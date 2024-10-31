@@ -10,16 +10,18 @@ import (
 )
 
 type AdminHandler struct {
-	db  *DB
-	api BotAPI
-	adm int64
-	log *zap.SugaredLogger
+	db       *DB
+	stateMan *StateManager
+	api      BotAPI
+	adm      int64
+	log      *zap.SugaredLogger
 }
 
-func NewAdminHandler(db *DB, log *zap.SugaredLogger) *AdminHandler {
+func NewAdminHandler(db *DB, stateMan *StateManager, log *zap.SugaredLogger) *AdminHandler {
 	return &AdminHandler{
-		db:  db,
-		log: log,
+		db:       db,
+		stateMan: stateMan,
+		log:      log,
 	}
 }
 
@@ -64,16 +66,25 @@ func (ah *AdminHandler) HandleAction(c tele.Context, action string) error {
 
 func (ah *AdminHandler) States() []UserState {
 	return []UserState{
-		// Admin handler doesn't have any specific states,
-		// but we need to implement this method to satisfy the interface
+		StateNotifyAll,
+		StateWaitingForNotification,
 	}
 }
 
 func (ah *AdminHandler) HandleState(c tele.Context, state UserState) error {
-	// Admin handler doesn't handle any specific states,
-	// but we need to implement this method to satisfy the interface
-	ah.log.Errorw("unexpected state for AdminHandler", "state", state)
-	return c.Send("Неизвестное действие. Пожалуйста, попробуйте еще раз.")
+	if c.Sender().ID != ah.adm {
+		return nil
+	}
+
+	switch state {
+	case StateNotifyAll:
+		return ah.HandleNotifyAll(c)
+	case StateWaitingForNotification:
+		return ah.handleNotification(c)
+	default:
+		ah.log.Errorw("unexpected state for AdminHandler", "state", state)
+		return c.Send("Неизвестное действие. Пожалуйста, попробуйте еще раз.")
+	}
 }
 
 func (h *AdminHandler) handleAdminAction(c tele.Context, action string) (*User, error) {
@@ -150,4 +161,49 @@ func (h *AdminHandler) handleBan(c tele.Context, user *User) error {
 
 func (h *AdminHandler) handleSkip(c tele.Context, user *User) error {
 	return c.Send(fmt.Sprintf("Бан пользователя %d пропущен.", user.ID))
+}
+
+func (ah *AdminHandler) HandleNotifyAll(c tele.Context) error {
+	ah.stateMan.SetState(ah.adm, StateWaitingForNotification)
+	return c.Send("Пожалуйста, отправьте текст уведомления, которое нужно разослать всем пользователям. Используйте /cancel для отмены.")
+}
+
+func (ah *AdminHandler) handleNotification(c tele.Context) error {
+	message := c.Text()
+	if message == "" {
+		return c.Send("Текст уведомления не может быть пустым. Попробуйте еще раз или используйте /cancel для отмены.")
+	}
+
+	users, err := ah.db.GetAllUsers()
+	if err != nil {
+		ah.log.Errorw("failed to get users for notification", "error", err)
+		return c.Send("Ошибка при получении списка пользователей.")
+	}
+
+	successCount := 0
+	failCount := 0
+
+	for _, user := range users {
+		if user.IsBanned {
+			continue
+		}
+
+		_, err := ah.api.Send(tele.ChatID(user.ID), message)
+		if err != nil {
+			ah.log.Warnw("failed to send notification to user",
+				"error", err,
+				"userID", user.ID)
+			failCount++
+		} else {
+			successCount++
+		}
+	}
+
+	return c.Send(fmt.Sprintf(
+		"Уведомление отправлено:\n"+
+			"✅ Успешно: %d\n"+
+			"❌ С ошибкой: %d",
+		successCount,
+		failCount,
+	))
 }

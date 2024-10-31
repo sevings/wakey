@@ -119,7 +119,7 @@ func (bot *Bot) Start(cfg Config, api BotAPI, wishSched, planSched Scheduler, bo
 	planHandler := NewPlanHandler(bot.db, planSched, wishSched, bot.stateManager, bot.log)
 	wishHandler := NewWishHandler(bot.db, wishSched, bot.stateManager, bot.log)
 	profileHandler := NewProfileHandler(bot.db, bot.stateManager, bot.log)
-	adminHandler := NewAdminHandler(bot.db, bot.log)
+	adminHandler := NewAdminHandler(bot.db, bot.stateManager, bot.log)
 	generalHandler := NewGeneralHandler(bot.db, bot.stateManager, bot.log, botName)
 	bot.handlers = []BotHandler{planHandler, wishHandler, profileHandler, adminHandler, generalHandler}
 
@@ -153,6 +153,7 @@ func (bot *Bot) Start(cfg Config, api BotAPI, wishSched, planSched Scheduler, bo
 	bot.api.Handle("/start", bot.handleStart)
 	bot.api.Handle("/cancel", bot.handleCancel)
 	bot.api.Handle("/stat", bot.handleStats)
+	bot.api.Handle("/notify", bot.handleNotify)
 
 	// Start the state manager cleanup routine
 	cleanupInterval := time.Duration(cfg.MaxStateAge) / 10 * time.Hour
@@ -326,6 +327,10 @@ func (bot *Bot) handleCancel(c tele.Context) error {
 
 func (bot *Bot) handleStats(c tele.Context) error {
 	return bot.handleState(c, StatePrintStats)
+}
+
+func (bot *Bot) handleNotify(c tele.Context) error {
+	return bot.handleState(c, StateNotifyAll)
 }
 
 func parseTime(timeStr string, userTz int32) (time.Time, error) {
