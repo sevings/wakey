@@ -223,44 +223,57 @@ func TestWishOperations(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestGetWishesByPlanID(t *testing.T) {
+func TestWishStateOperations(t *testing.T) {
 	db := setupTestDB(t)
 
-	// Create a user
-	user := &wakey.User{ID: 8, Name: "Wish Test User"}
+	// Create a user and plan
+	user := &wakey.User{ID: 40, Name: "Wish State User"}
 	err := db.CreateUser(user)
 	require.NoError(t, err)
 
-	// Create a plan
 	plan := &wakey.Plan{
-		UserID:  8,
-		Content: "Test Plan",
+		UserID:  40,
+		Content: "Wish State Plan",
 		WakeAt:  time.Now().Add(24 * time.Hour),
 	}
 	err = db.SavePlan(plan)
 	require.NoError(t, err)
 
-	// Create multiple wishes for the plan
-	wishes := []*wakey.Wish{
-		{FromID: 9, PlanID: plan.ID, Content: "Wish 1"},
-		{FromID: 10, PlanID: plan.ID, Content: "Wish 2"},
-		{FromID: 11, PlanID: plan.ID, Content: "Wish 3"},
+	// Create a wish
+	wish := &wakey.Wish{
+		FromID:  41,
+		PlanID:  plan.ID,
+		Content: "Test Wish State",
+	}
+	err = db.SaveWish(wish)
+	require.NoError(t, err)
+
+	// Verify default state is "N" (new)
+	fetchedWish, err := db.GetWishByID(wish.ID)
+	require.NoError(t, err)
+	require.Equal(t, wakey.WishStateNew, fetchedWish.State)
+
+	// Test updating state
+	states := []wakey.WishState{
+		wakey.WishStateSent,     // "S"
+		wakey.WishStateLiked,    // "L"
+		wakey.WishStateDisliked, // "D"
+		wakey.WishStateReported, // "R"
 	}
 
-	for _, wish := range wishes {
-		err := db.SaveWish(wish)
+	for _, state := range states {
+		err = db.UpdateWishState(wish.ID, state)
 		require.NoError(t, err)
+
+		fetchedWish, err = db.GetWishByID(wish.ID)
+		require.NoError(t, err)
+		require.Equal(t, state, fetchedWish.State)
 	}
 
-	// Test getting wishes for the plan
-	fetchedWishes, err := db.GetWishesByPlanID(plan.ID)
-	require.NoError(t, err)
-	require.Len(t, fetchedWishes, len(wishes))
-
-	// Test getting wishes for non-existent plan
-	nonExistentWishes, err := db.GetWishesByPlanID(999)
-	require.NoError(t, err)
-	require.Empty(t, nonExistentWishes)
+	// Test updating non-existent wish
+	err = db.UpdateWishState(999, wakey.WishStateLiked)
+	require.Error(t, err)
+	require.Equal(t, wakey.ErrNotFound, err)
 }
 
 func TestFindPlanForWish(t *testing.T) {
@@ -391,6 +404,102 @@ func TestGetFuturePlans(t *testing.T) {
 	}
 	require.True(t, futureContents["Future Plan 1"])
 	require.True(t, futureContents["Future Plan 2"])
+}
+
+func TestGetNewWishesByUserID(t *testing.T) {
+	db := setupTestDB(t)
+
+	// Create users
+	user1 := &wakey.User{ID: 50, Name: "Wishes User 1"}
+	user2 := &wakey.User{ID: 51, Name: "Wishes User 2"}
+	err := db.CreateUser(user1)
+	require.NoError(t, err)
+	err = db.CreateUser(user2)
+	require.NoError(t, err)
+
+	// Create plans for both users
+	plan1 := &wakey.Plan{
+		UserID:  user1.ID,
+		Content: "Plan 1",
+		WakeAt:  time.Now().Add(24 * time.Hour),
+	}
+	plan2 := &wakey.Plan{
+		UserID:  user1.ID,
+		Content: "Plan 2",
+		WakeAt:  time.Now().Add(48 * time.Hour),
+	}
+	plan3 := &wakey.Plan{
+		UserID:  user2.ID,
+		Content: "Plan 3",
+		WakeAt:  time.Now().Add(24 * time.Hour),
+	}
+
+	err = db.SavePlan(plan1)
+	require.NoError(t, err)
+	err = db.SavePlan(plan2)
+	require.NoError(t, err)
+	err = db.SavePlan(plan3)
+	require.NoError(t, err)
+
+	// Create various wishes with different states
+	wishes := []*wakey.Wish{
+		{
+			FromID:  60,
+			PlanID:  plan1.ID,
+			Content: "New Wish 1",
+			State:   wakey.WishStateNew,
+		},
+		{
+			FromID:  61,
+			PlanID:  plan1.ID,
+			Content: "Sent Wish",
+			State:   wakey.WishStateSent,
+		},
+		{
+			FromID:  62,
+			PlanID:  plan2.ID,
+			Content: "New Wish 2",
+			State:   wakey.WishStateNew,
+		},
+		{
+			FromID:  63,
+			PlanID:  plan3.ID,
+			Content: "New Wish 3",
+			State:   wakey.WishStateNew,
+		},
+	}
+
+	for _, wish := range wishes {
+		err := db.SaveWish(wish)
+		require.NoError(t, err)
+	}
+
+	// Test getting new wishes for user1
+	newWishes, err := db.GetNewWishesByUserID(user1.ID)
+	require.NoError(t, err)
+	require.Len(t, newWishes, 2) // Should only get the new wishes for user1's plans
+
+	// Verify the contents
+	wishContents := make(map[string]bool)
+	for _, wish := range newWishes {
+		wishContents[wish.Content] = true
+		require.Equal(t, wakey.WishStateNew, wish.State)
+	}
+	require.True(t, wishContents["New Wish 1"])
+	require.True(t, wishContents["New Wish 2"])
+	require.False(t, wishContents["Sent Wish"])
+	require.False(t, wishContents["New Wish 3"])
+
+	// Test getting new wishes for user2
+	newWishes, err = db.GetNewWishesByUserID(user2.ID)
+	require.NoError(t, err)
+	require.Len(t, newWishes, 1)
+	require.Equal(t, "New Wish 3", newWishes[0].Content)
+
+	// Test getting new wishes for non-existent user
+	newWishes, err = db.GetNewWishesByUserID(999)
+	require.NoError(t, err)
+	require.Empty(t, newWishes)
 }
 
 func TestGetStats(t *testing.T) {

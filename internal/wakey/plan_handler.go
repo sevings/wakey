@@ -167,8 +167,8 @@ func (ph *PlanHandler) schedulePlanReminder(user *User) {
 }
 
 func (ph *PlanHandler) scheduleWishSend(plan *Plan) {
-	ph.wishSched.Schedule(plan.WakeAt, JobID(plan.ID))
-	ph.log.Infow("scheduled wish", "planID", plan.ID, "wakeAt", plan.WakeAt)
+	ph.wishSched.Schedule(plan.WakeAt, JobID(plan.UserID))
+	ph.log.Infow("scheduled wish", "userID", plan.UserID, "wakeAt", plan.WakeAt)
 }
 
 func (ph *PlanHandler) askAboutPlans(c tele.Context) error {
@@ -291,6 +291,7 @@ func (ph *PlanHandler) HandlePlansUpdate(c tele.Context) error {
 		ph.log.Errorw("failed to save plan", "error", err)
 		return c.Send("Извините, произошла ошибка при сохранении вашего статуса. Пожалуйста, попробуйте позже.")
 	}
+	ph.scheduleWishSend(plan)
 
 	err = c.Send("Ваш статус успешно обновлен.")
 	if err != nil {
@@ -509,7 +510,7 @@ func (ph *PlanHandler) ScheduleAllNotifications() {
 		}
 	}
 
-	ph.log.Infof("Scheduled notifications for %d users", cnt)
+	ph.log.Infow("Scheduled notifications", "users", cnt)
 
 	plans, err := ph.db.GetFuturePlans()
 	if err != nil {
@@ -520,4 +521,6 @@ func (ph *PlanHandler) ScheduleAllNotifications() {
 	for _, plan := range plans {
 		ph.scheduleWishSend(&plan)
 	}
+
+	ph.log.Infow("Scheduled plans", "users", len(plans))
 }

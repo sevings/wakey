@@ -37,11 +37,22 @@ type Plan struct {
 	OfferedAt time.Time
 }
 
+type WishState string
+
+const (
+	WishStateNew      WishState = "N"
+	WishStateSent     WishState = "S"
+	WishStateLiked    WishState = "L"
+	WishStateDisliked WishState = "D"
+	WishStateReported WishState = "R"
+)
+
 type Wish struct {
 	gorm.Model
 	FromID  int64
 	PlanID  uint
 	Content string
+	State   WishState `gorm:"type:char(1);default:'N'"`
 }
 
 type Stats struct {
@@ -311,13 +322,33 @@ func (db *DB) GetWishByID(wishID uint) (*Wish, error) {
 	return &wish, nil
 }
 
-func (db *DB) GetWishesByPlanID(planID uint) ([]Wish, error) {
+func (db *DB) GetNewWishesByUserID(userID int64) ([]Wish, error) {
 	var wishes []Wish
-	result := db.db.Where("plan_id = ?", planID).Find(&wishes)
+	result := db.db.
+		Joins("JOIN plans ON wishes.plan_id = plans.id").
+		Where("plans.user_id = ? AND wishes.state = ?", userID, WishStateNew).
+		Find(&wishes)
+
 	if result.Error != nil {
 		return nil, result.Error
 	}
 	return wishes, nil
+}
+
+func (db *DB) UpdateWishState(wishID uint, state WishState) error {
+	result := db.db.Model(&Wish{}).
+		Where("id = ?", wishID).
+		Update("state", state)
+
+	if result.Error != nil {
+		return result.Error
+	}
+
+	if result.RowsAffected == 0 {
+		return ErrNotFound
+	}
+
+	return nil
 }
 
 func (db *DB) GetFuturePlans() ([]Plan, error) {

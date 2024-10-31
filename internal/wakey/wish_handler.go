@@ -1,6 +1,7 @@
 package wakey
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -48,6 +49,18 @@ func (wh *WishHandler) Actions() []string {
 	}
 }
 
+func getButtonWishID(c tele.Context) (uint64, error) {
+	data := strings.Split(c.Data(), "|")
+	if len(data) != 2 {
+		return 0, errors.New("Неверный формат данных.")
+	}
+	wishID, err := strconv.ParseUint(data[1], 10, 64)
+	if err != nil {
+		return 0, errors.New("Неверный ID сообщения.")
+	}
+	return wishID, nil
+}
+
 func (wh *WishHandler) HandleAction(c tele.Context, action string) error {
 	switch action {
 	case btnSendWishYesID:
@@ -57,13 +70,9 @@ func (wh *WishHandler) HandleAction(c tele.Context, action string) error {
 	case btnWishDislikeID:
 		return wh.HandleWishDislike(c)
 	case btnWishLikeID, btnWishReportID:
-		data := strings.Split(c.Data(), "|")
-		if len(data) != 2 {
-			return c.Send("Неверный формат данных.")
-		}
-		wishID, err := strconv.ParseUint(data[1], 10, 64)
+		wishID, err := getButtonWishID(c)
 		if err != nil {
-			return c.Send("Неверный ID сообщения.")
+			return c.Send(err.Error())
 		}
 		wish, err := wh.db.GetWishByID(uint(wishID))
 		if err != nil {
@@ -109,6 +118,13 @@ func (wh *WishHandler) HandleWishLike(c tele.Context, wish *Wish) error {
 		return c.Send("Извините, произошла ошибка. Пожалуйста, попробуйте позже.")
 	}
 
+	// Update wish state
+	err = wh.db.UpdateWishState(wish.ID, WishStateLiked)
+	if err != nil {
+		wh.log.Errorw("failed to update wish state", "error", err, "wishID", wish.ID)
+		return c.Send("Извините, произошла ошибка. Пожалуйста, попробуйте позже.")
+	}
+
 	// Send message to the wish author
 	thanksMsg := fmt.Sprintf("Пользователю %s понравилось ваше сообщение.", user.Name)
 	_, err = wh.api.Send(tele.ChatID(wish.FromID), thanksMsg)
@@ -125,7 +141,19 @@ func (wh *WishHandler) HandleWishLike(c tele.Context, wish *Wish) error {
 }
 
 func (wh *WishHandler) HandleWishDislike(c tele.Context) error {
-	err := c.Edit(c.Message().Text + "\n\n" + btnWishDislikeText)
+	wishID, err := getButtonWishID(c)
+	if err != nil {
+		return c.Send(err.Error())
+	}
+
+	// Update wish state
+	err = wh.db.UpdateWishState(uint(wishID), WishStateDisliked)
+	if err != nil {
+		wh.log.Errorw("failed to update wish state", "error", err, "wishID", wishID)
+		return c.Send("Извините, произошла ошибка. Пожалуйста, попробуйте позже.")
+	}
+
+	err = c.Edit(c.Message().Text + "\n\n" + btnWishDislikeText)
 	if err != nil {
 		return err
 	}
@@ -134,6 +162,13 @@ func (wh *WishHandler) HandleWishDislike(c tele.Context) error {
 }
 
 func (wh *WishHandler) HandleWishReport(c tele.Context, wish *Wish) error {
+	// Update wish state
+	err := wh.db.UpdateWishState(wish.ID, WishStateReported)
+	if err != nil {
+		wh.log.Errorw("failed to update wish state", "error", err, "wishID", wish.ID)
+		return c.Send("Извините, произошла ошибка. Пожалуйста, попробуйте позже.")
+	}
+
 	if wh.adm != 0 {
 		reportMsg := fmt.Sprintf("Жалоба на сообщение:\n\nАвтор ID: %d\nТекст сообщения: %s", wish.FromID, wish.Content)
 
@@ -153,7 +188,7 @@ func (wh *WishHandler) HandleWishReport(c tele.Context, wish *Wish) error {
 		}
 	}
 
-	err := c.Edit(c.Message().Text + "\n\n" + btnWishReportText)
+	err = c.Edit(c.Message().Text + "\n\n" + btnWishReportText)
 	if err != nil {
 		return err
 	}
@@ -259,40 +294,37 @@ func (wh *WishHandler) HandleWishInput(c tele.Context) error {
 }
 
 func (wh *WishHandler) SendWishes(id JobID) {
-	planID := uint(id)
-	plan, err := wh.db.GetPlanByID(planID)
+	userID := int64(id)
+
+	// Get user
+	user, err := wh.db.GetUserByID(userID)
 	if err != nil {
-		wh.log.Errorw("failed to get plan", "error", err, "planID", planID)
+		wh.log.Errorw("failed to get user", "error", err, "userID", userID)
 		return
 	}
 
-	// Check if the recipient is banned
-	recipient, err := wh.db.GetUserByID(plan.UserID)
-	if err != nil {
-		wh.log.Errorw("failed to get recipient", "error", err, "userID", plan.UserID)
+	// Skip if user is banned
+	if user.IsBanned {
+		wh.log.Infow("skipping wishes for banned user", "userID", userID)
 		return
 	}
 
-	if recipient.IsBanned {
-		wh.log.Infow("skipping wishes for banned user", "userID", plan.UserID)
-		return
-	}
-
-	// Get all wishes for this plan
-	wishes, err := wh.db.GetWishesByPlanID(planID)
+	// Get all new wishes for user's plans
+	wishes, err := wh.db.GetNewWishesByUserID(userID)
 	if err != nil {
-		wh.log.Errorw("failed to get wishes", "error", err, "planID", planID)
+		wh.log.Errorw("failed to get new wishes", "error", err, "userID", userID)
 		return
 	}
 
 	if len(wishes) == 0 {
-		wh.log.Infow("no wishes found for plan", "planID", planID)
+		wh.log.Infow("no new wishes found for user", "userID", userID)
 		return
 	}
 
-	_, err = wh.api.Send(tele.ChatID(plan.UserID), "Доброе утро! Вот, что вам сегодня написали:")
+	// Send greeting
+	_, err = wh.api.Send(tele.ChatID(userID), "Доброе утро! Вот, что вам написали:")
 	if err != nil {
-		wh.log.Errorw("failed to send wish", "error", err, "userID", plan.UserID)
+		wh.log.Errorw("failed to send greeting", "error", err, "userID", userID)
 	}
 
 	// Send each wish to the recipient
@@ -309,9 +341,16 @@ func (wh *WishHandler) SendWishes(id JobID) {
 		)
 
 		// Send message with inline keyboard
-		_, err = wh.api.Send(tele.ChatID(plan.UserID), wish.Content, inlineKeyboard)
+		_, err = wh.api.Send(tele.ChatID(userID), wish.Content, inlineKeyboard)
 		if err != nil {
-			wh.log.Errorw("failed to send wish", "error", err, "userID", plan.UserID, "wishID", wish.ID)
+			wh.log.Errorw("failed to send wish", "error", err, "userID", userID, "wishID", wish.ID)
+			continue
+		}
+
+		// Update wish state to sent
+		err = wh.db.UpdateWishState(wish.ID, WishStateSent)
+		if err != nil {
+			wh.log.Errorw("failed to update wish state", "error", err, "wishID", wish.ID)
 		}
 	}
 }
