@@ -571,6 +571,73 @@ func TestGetStats(t *testing.T) {
 	require.InDelta(t, 2.0/7.0, stats.AvgWishesLast7Days, 0.001)
 }
 
+func TestGetStatsWithLikedWishes(t *testing.T) {
+	db := setupTestDB(t)
+
+	// Create test users
+	users := []*wakey.User{
+		{ID: 30, Name: "Stats User 1"},
+		{ID: 31, Name: "Stats User 2"},
+	}
+	for _, user := range users {
+		err := db.CreateUser(user)
+		require.NoError(t, err)
+	}
+
+	// Create a plan
+	plan := &wakey.Plan{
+		UserID:  30,
+		Content: "Stats Plan 1",
+		WakeAt:  time.Now().Add(24 * time.Hour),
+	}
+	err := db.SavePlan(plan)
+	require.NoError(t, err)
+
+	// Create wishes with different states
+	wishes := []*wakey.Wish{
+		{
+			FromID:  31,
+			PlanID:  plan.ID,
+			Content: "Liked Wish 1",
+			State:   wakey.WishStateLiked,
+		},
+		{
+			FromID:  31,
+			PlanID:  plan.ID,
+			Content: "New Wish",
+			State:   wakey.WishStateNew,
+		},
+		{
+			FromID:  31,
+			PlanID:  plan.ID,
+			Content: "Liked Wish 2",
+			State:   wakey.WishStateLiked,
+		},
+		{
+			FromID:  31,
+			PlanID:  plan.ID,
+			Content: "Disliked Wish",
+			State:   wakey.WishStateDisliked,
+		},
+	}
+
+	for _, wish := range wishes {
+		err := db.SaveWish(wish)
+		require.NoError(t, err)
+	}
+
+	// Get stats
+	stats, err := db.GetStats()
+	require.NoError(t, err)
+	require.NotNil(t, stats)
+
+	// Verify liked wishes stats
+	require.Equal(t, int64(2), stats.TotalLikedWishes)
+	require.InDelta(t, 50.0, stats.LikedWishesPercent, 0.1) // 2 liked out of 4 total = 50%
+	require.Equal(t, int64(2), stats.LikedWishesLast7Days)
+	require.InDelta(t, 50.0, stats.LikedWishesLast7DaysPercent, 0.1)
+}
+
 func TestDBStates(t *testing.T) {
 	db := setupTestDB(t)
 

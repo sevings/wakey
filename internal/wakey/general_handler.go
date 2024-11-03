@@ -143,21 +143,27 @@ func (gh *GeneralHandler) printStats(c tele.Context) error {
 
 *Общая статистика:*
 • Всего пользователей: %d
-• Всего планов: %d
-• Всего пожеланий: %d
+• Всего статусов: %d
+• Всего сообщений: %d
+• Понравившихся сообщений: %d (%.2f%%)
 
 *За последние 7 дней:*
 • Новых пользователей: %d
 • Активных пользователей: %d
-• Среднее число планов в день: %.2f
-• Среднее число пожеланий в день: %.2f`,
+• Среднее число статусов в день: %.2f
+• Среднее число сообщений в день: %.2f
+• Понравившихся сообщений: %d (%.2f%%)`,
 		stats.TotalUsers,
 		stats.TotalPlans,
 		stats.TotalWishes,
+		stats.TotalLikedWishes,
+		stats.LikedWishesPercent,
 		stats.NewUsersLast7Days,
 		stats.ActiveUsersLast7Days,
 		stats.AvgPlansLast7Days,
 		stats.AvgWishesLast7Days,
+		stats.LikedWishesLast7Days,
+		stats.LikedWishesLast7DaysPercent,
 	)
 
 	return c.Send(message, tele.ModeMarkdown)

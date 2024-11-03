@@ -65,6 +65,11 @@ type Stats struct {
 
 	AvgPlansLast7Days  float64
 	AvgWishesLast7Days float64
+
+	TotalLikedWishes            int64
+	LikedWishesPercent          float64
+	LikedWishesLast7Days        int64
+	LikedWishesLast7DaysPercent float64
 }
 
 type State struct {
@@ -156,6 +161,42 @@ func (db *DB) GetStats() (*Stats, error) {
 		return nil, err
 	}
 	stats.AvgWishesLast7Days = float64(wishesLast7Days) / 7.0
+
+	// Calculate total liked wishes and percentage
+	var totalLikedWishes int64
+	err = db.db.Model(&Wish{}).
+		Where("state = ?", WishStateLiked).
+		Count(&totalLikedWishes).Error
+	if err != nil {
+		return nil, err
+	}
+	stats.TotalLikedWishes = totalLikedWishes
+
+	if stats.TotalWishes > 0 {
+		stats.LikedWishesPercent = float64(totalLikedWishes) * 100.0 / float64(stats.TotalWishes)
+	}
+
+	// Calculate liked wishes in last 7 days and percentage
+	var likedWishesLast7Days int64
+	err = db.db.Model(&Wish{}).
+		Where("state = ? AND created_at >= ?", WishStateLiked, sevenDaysAgo).
+		Count(&likedWishesLast7Days).Error
+	if err != nil {
+		return nil, err
+	}
+	stats.LikedWishesLast7Days = likedWishesLast7Days
+
+	var totalWishesLast7Days int64
+	err = db.db.Model(&Wish{}).
+		Where("created_at >= ?", sevenDaysAgo).
+		Count(&totalWishesLast7Days).Error
+	if err != nil {
+		return nil, err
+	}
+
+	if totalWishesLast7Days > 0 {
+		stats.LikedWishesLast7DaysPercent = float64(likedWishesLast7Days) * 100.0 / float64(totalWishesLast7Days)
+	}
 
 	return stats, nil
 }
