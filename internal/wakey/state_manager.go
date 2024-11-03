@@ -3,6 +3,8 @@ package wakey
 import (
 	"sync"
 	"time"
+
+	"errors"
 )
 
 type UserState int
@@ -158,4 +160,44 @@ func (sm *StateManager) CleanupOldStates(maxAge time.Duration) {
 			delete(sm.states, userID)
 		}
 	}
+}
+
+// ImportStates loads initial states into the manager.
+// Should only be called before Start() to populate initial data.
+func (sm *StateManager) ImportStates(states map[int64]*UserData) error {
+	sm.mutex.Lock()
+	defer sm.mutex.Unlock()
+
+	if !sm.isStopped && sm.ticker != nil {
+		return errors.New("cannot import states while manager is running")
+	}
+
+	// Deep copy the input states to prevent external modifications
+	sm.states = make(map[int64]*UserData, len(states))
+	for userID, userData := range states {
+		stateCopy := *userData
+		sm.states[userID] = &stateCopy
+	}
+
+	return nil
+}
+
+// ExportStates returns a copy of all current states.
+// Should only be called after Stop() to save final state.
+func (sm *StateManager) ExportStates() (map[int64]*UserData, error) {
+	sm.mutex.RLock()
+	defer sm.mutex.RUnlock()
+
+	if !sm.isStopped {
+		return nil, errors.New("cannot export states while manager is running")
+	}
+
+	// Deep copy the states to prevent external modifications
+	states := make(map[int64]*UserData, len(sm.states))
+	for userID, userData := range sm.states {
+		stateCopy := *userData
+		states[userID] = &stateCopy
+	}
+
+	return states, nil
 }

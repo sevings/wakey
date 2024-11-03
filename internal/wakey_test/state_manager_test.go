@@ -111,4 +111,98 @@ func TestStateManager(t *testing.T) {
 		// Try to start again after stopping (should not panic)
 		sm.Start(time.Minute, time.Hour)
 	})
+
+	t.Run("ImportStates and ExportStates", func(t *testing.T) {
+		sm := wakey.NewStateManager()
+		baseTime := time.Now()
+
+		// Create test data
+		initialStates := map[int64]*wakey.UserData{
+			1: {
+				State:        wakey.StateAwaitingName,
+				Name:         "John",
+				Bio:          "Test bio 1",
+				LastUpdated:  baseTime,
+				AskAboutWish: true,
+			},
+			2: {
+				State:        wakey.StateAwaitingBio,
+				Name:         "Jane",
+				Bio:          "Test bio 2",
+				LastUpdated:  baseTime,
+				AskAboutWish: false,
+			},
+		}
+
+		// Test import before start
+		err := sm.ImportStates(initialStates)
+		require.NoError(t, err)
+
+		// Verify imported states
+		for userID, expectedData := range initialStates {
+			userData, exists := sm.GetUserData(userID)
+			require.True(t, exists)
+			require.Equal(t, expectedData.State, userData.State)
+			require.Equal(t, expectedData.Name, userData.Name)
+			require.Equal(t, expectedData.Bio, userData.Bio)
+			require.Equal(t, expectedData.AskAboutWish, userData.AskAboutWish)
+		}
+
+		// Test import after start (should fail)
+		sm.Start(time.Minute, time.Hour)
+		err = sm.ImportStates(initialStates)
+		require.Error(t, err)
+
+		// Test export before stop (should fail)
+		_, err = sm.ExportStates()
+		require.Error(t, err)
+
+		// Stop the manager
+		sm.Stop()
+
+		// Test export after stop
+		exportedStates, err := sm.ExportStates()
+		require.NoError(t, err)
+
+		// Verify exported states match the initial states
+		require.Equal(t, len(initialStates), len(exportedStates))
+		for userID, expectedData := range initialStates {
+			exportedData, exists := exportedStates[userID]
+			require.True(t, exists)
+			require.Equal(t, expectedData.State, exportedData.State)
+			require.Equal(t, expectedData.Name, exportedData.Name)
+			require.Equal(t, expectedData.Bio, exportedData.Bio)
+			require.Equal(t, expectedData.AskAboutWish, exportedData.AskAboutWish)
+		}
+
+		// Test data isolation
+		exportedStates[1].Name = "Modified Name"
+		userData, exists := sm.GetUserData(int64(1))
+		require.True(t, exists)
+		require.NotEqual(t, "Modified Name", userData.Name)
+	})
+
+	t.Run("Import empty states", func(t *testing.T) {
+		sm := wakey.NewStateManager()
+
+		err := sm.ImportStates(make(map[int64]*wakey.UserData))
+		require.NoError(t, err)
+
+		sm.Stop()
+		exported, err := sm.ExportStates()
+		require.NoError(t, err)
+		require.Empty(t, exported)
+	})
+
+	t.Run("Import nil states", func(t *testing.T) {
+		sm := wakey.NewStateManager()
+
+		err := sm.ImportStates(nil)
+		require.NoError(t, err)
+
+		sm.Stop()
+		exported, err := sm.ExportStates()
+		require.NoError(t, err)
+		require.Empty(t, exported)
+	})
 }

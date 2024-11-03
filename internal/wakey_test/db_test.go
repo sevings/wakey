@@ -570,3 +570,69 @@ func TestGetStats(t *testing.T) {
 	require.InDelta(t, 2.0/7.0, stats.AvgPlansLast7Days, 0.001)
 	require.InDelta(t, 2.0/7.0, stats.AvgWishesLast7Days, 0.001)
 }
+
+func TestDBStates(t *testing.T) {
+	db := setupTestDB(t)
+
+	// Create test data
+	baseTime := time.Now().UTC()
+	states := map[int64]*wakey.UserData{
+		1: {
+			State:        wakey.StateAwaitingName,
+			Name:         "John",
+			Bio:          "Test bio 1",
+			Plans:        "Morning plan",
+			TargetPlanID: 123,
+			AskAboutWish: true,
+			LastUpdated:  baseTime,
+		},
+		2: {
+			State:        wakey.StateAwaitingBio,
+			Name:         "Jane",
+			Bio:          "Test bio 2",
+			Plans:        "Evening plan",
+			TargetPlanID: 456,
+			AskAboutWish: false,
+			LastUpdated:  baseTime,
+		},
+	}
+
+	// Test saving states
+	err := db.SaveStates(states)
+	require.NoError(t, err)
+
+	// Test loading states
+	loadedStates, err := db.LoadStates()
+	require.NoError(t, err)
+	require.Equal(t, len(states), len(loadedStates))
+
+	// Verify loaded data
+	for userID, expectedData := range states {
+		loadedData, exists := loadedStates[userID]
+		require.True(t, exists)
+		require.Equal(t, expectedData.State, loadedData.State)
+		require.Equal(t, expectedData.Name, loadedData.Name)
+		require.Equal(t, expectedData.Bio, loadedData.Bio)
+		require.Equal(t, expectedData.Plans, loadedData.Plans)
+		require.Equal(t, expectedData.TargetPlanID, loadedData.TargetPlanID)
+		require.Equal(t, expectedData.AskAboutWish, loadedData.AskAboutWish)
+		require.WithinDuration(t, expectedData.LastUpdated, loadedData.LastUpdated, time.Second)
+	}
+
+	// Test overwriting states
+	newStates := map[int64]*wakey.UserData{
+		3: {
+			State:       wakey.StateAwaitingPlans,
+			Name:        "Bob",
+			LastUpdated: baseTime,
+		},
+	}
+
+	err = db.SaveStates(newStates)
+	require.NoError(t, err)
+
+	loadedStates, err = db.LoadStates()
+	require.NoError(t, err)
+	require.Equal(t, 1, len(loadedStates))
+	require.Contains(t, loadedStates, int64(3))
+}

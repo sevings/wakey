@@ -67,6 +67,11 @@ type Stats struct {
 	AvgWishesLast7Days float64
 }
 
+type State struct {
+	UserID int64 `gorm:"primaryKey;autoIncrement:false"`
+	UserData
+}
+
 func LoadDatabase(path string) (*DB, bool) {
 	log := zap.L().Named("db").Sugar()
 	db, err := gorm.Open(sqlite.Open(path), &gorm.Config{})
@@ -75,7 +80,7 @@ func LoadDatabase(path string) (*DB, bool) {
 		return nil, false
 	}
 
-	err = db.AutoMigrate(&User{}, &Plan{}, &Wish{})
+	err = db.AutoMigrate(&User{}, &Plan{}, &Wish{}, &State{})
 	if err != nil {
 		log.Error(err)
 		return nil, false
@@ -361,4 +366,40 @@ func (db *DB) GetFuturePlans() ([]Plan, error) {
 		return nil, result.Error
 	}
 	return plans, nil
+}
+
+func (db *DB) SaveStates(states map[int64]*UserData) error {
+	// First, clear existing states
+	if err := db.db.Where("1 = 1").Delete(&State{}).Error; err != nil {
+		return fmt.Errorf("failed to clear states: %w", err)
+	}
+
+	// Create new states
+	for userID, userData := range states {
+		state := State{
+			UserID:   userID,
+			UserData: *userData,
+		}
+
+		if err := db.db.Save(&state).Error; err != nil {
+			return fmt.Errorf("failed to save state for user %d: %w", userID, err)
+		}
+	}
+
+	return nil
+}
+
+func (db *DB) LoadStates() (map[int64]*UserData, error) {
+	var states []State
+	if err := db.db.Find(&states).Error; err != nil {
+		return nil, fmt.Errorf("failed to load states: %w", err)
+	}
+
+	result := make(map[int64]*UserData)
+	for _, state := range states {
+		userData := state.UserData
+		result[state.UserID] = &userData
+	}
+
+	return result, nil
 }

@@ -101,10 +101,10 @@ const (
 	btnSkipBanText          = "⏭️ Пропустить"
 )
 
-func NewBot(db *DB) *Bot {
+func NewBot(db *DB, stateMan *StateManager) *Bot {
 	bot := &Bot{
 		db:             db,
-		stateManager:   NewStateManager(),
+		stateManager:   stateMan,
 		log:            zap.L().Named("bot").Sugar(),
 		actionHandlers: make(map[string]BotHandler),
 		stateHandlers:  make(map[UserState]BotHandler),
@@ -155,11 +155,6 @@ func (bot *Bot) Start(cfg Config, api BotAPI, wishSched, planSched Scheduler, bo
 	bot.api.Handle("/stat", bot.handleStats)
 	bot.api.Handle("/notify", bot.handleNotify)
 
-	// Start the state manager cleanup routine
-	cleanupInterval := time.Duration(cfg.MaxStateAge) / 10 * time.Hour
-	maxStateAge := time.Duration(cfg.MaxStateAge) * time.Hour
-	bot.stateManager.Start(cleanupInterval, maxStateAge)
-
 	go func() {
 		bot.log.Info("starting bot")
 		bot.api.Start()
@@ -168,7 +163,6 @@ func (bot *Bot) Start(cfg Config, api BotAPI, wishSched, planSched Scheduler, bo
 }
 
 func (bot *Bot) Stop() {
-	bot.stateManager.Stop()
 	bot.api.Stop()
 }
 

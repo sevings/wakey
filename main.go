@@ -44,7 +44,17 @@ func main() {
 	planSched.Start()
 	defer planSched.Stop()
 
-	bot := wakey.NewBot(db)
+	stateMan := wakey.NewStateManager()
+	stateStorage := wakey.NewStateStorage(db)
+	stateStorage.LoadToManager(stateMan)
+	defer stateStorage.SaveFromManager(stateMan)
+
+	maxStateAge := time.Duration(cfg.MaxStateAge) * time.Hour
+	cleanupInterval := maxStateAge / 10
+	stateMan.Start(cleanupInterval, maxStateAge)
+	defer stateMan.Stop()
+
+	bot := wakey.NewBot(db, stateMan)
 
 	pref := tele.Settings{
 		Token:   cfg.TgToken,
