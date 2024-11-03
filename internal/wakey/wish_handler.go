@@ -132,11 +132,6 @@ func (wh *WishHandler) HandleWishLike(c tele.Context, wish *Wish) error {
 		wh.log.Errorw("failed to send thanks message", "error", err, "userID", wish.FromID)
 	}
 
-	err = c.Edit(c.Message().Text + "\n\n" + btnWishLikeText)
-	if err != nil {
-		return err
-	}
-
 	return c.Send("Благодарность за сообщение отправлена.")
 }
 
@@ -151,11 +146,6 @@ func (wh *WishHandler) HandleWishDislike(c tele.Context) error {
 	if err != nil {
 		wh.log.Errorw("failed to update wish state", "error", err, "wishID", wishID)
 		return c.Send("Извините, произошла ошибка. Пожалуйста, попробуйте позже.")
-	}
-
-	err = c.Edit(c.Message().Text + "\n\n" + btnWishDislikeText)
-	if err != nil {
-		return err
 	}
 
 	return c.Send("Спасибо за ваш ответ.")
@@ -188,21 +178,11 @@ func (wh *WishHandler) HandleWishReport(c tele.Context, wish *Wish) error {
 		}
 	}
 
-	err = c.Edit(c.Message().Text + "\n\n" + btnWishReportText)
-	if err != nil {
-		return err
-	}
-
 	return c.Send("Жалоба на сообщение отправлена.")
 }
 
 func (wh *WishHandler) HandleSendWishResponse(c tele.Context) error {
-	err := c.Edit(c.Message().Text + "\n\n" + btnSendWishYesText)
-	if err != nil {
-		return err
-	}
-
-	err = c.Send("Хорошо, давайте отправим сообщение!")
+	err := c.Send("Хорошо, давайте отправим сообщение!")
 	if err != nil {
 		return err
 	}
@@ -211,11 +191,6 @@ func (wh *WishHandler) HandleSendWishResponse(c tele.Context) error {
 }
 
 func (wh *WishHandler) HandleSendWishNo(c tele.Context) error {
-	err := c.Edit(c.Message().Text + "\n\n" + btnSendWishNoText)
-	if err != nil {
-		return err
-	}
-
 	wh.stateMan.SetState(c.Sender().ID, StateSuggestActions)
 	return c.Send("Хорошо, может быть в следующий раз!")
 }

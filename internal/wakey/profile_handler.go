@@ -40,27 +40,12 @@ func (ph *ProfileHandler) HandleAction(c tele.Context, action string) error {
 	case btnShowProfileID:
 		return ph.HandleShowProfile(c)
 	case btnChangeNameID:
-		err := c.Edit(c.Message().Text + "\n\n" + btnChangeNameText)
-		if err != nil {
-			return err
-		}
-
 		ph.stateMan.SetState(userID, StateUpdatingName)
 		return c.Send("Пожалуйста, введите ваше новое имя. Используйте команду /cancel для отмены.")
 	case btnChangeBioID:
-		err := c.Edit(c.Message().Text + "\n\n" + btnChangeBioText)
-		if err != nil {
-			return err
-		}
-
 		ph.stateMan.SetState(userID, StateUpdatingBio)
 		return c.Send("Пожалуйста, введите ваше новое био. Используйте команду /cancel для отмены.")
 	case btnChangeTimezoneID:
-		err := c.Edit(c.Message().Text + "\n\n" + btnChangeTimezoneText)
-		if err != nil {
-			return err
-		}
-
 		ph.stateMan.SetState(userID, StateUpdatingTimezone)
 		return c.Send("Пожалуйста, введите текущее время в формате ЧЧ:ММ. Используйте команду /cancel для отмены.")
 	default:
@@ -99,7 +84,7 @@ func (ph *ProfileHandler) HandleState(c tele.Context, state UserState) error {
 		return ph.HandleTimezoneUpdate(c)
 	default:
 		ph.log.Errorw("unexpected state for ProfileHandler", "state", state)
-		return c.Edit("Неизвестное действие. Пожалуйста, попробуйте еще раз.")
+		return c.Send("Неизвестное действие. Пожалуйста, попробуйте еще раз.")
 	}
 }
 
@@ -141,11 +126,6 @@ func (ph *ProfileHandler) HandleStart(c tele.Context) error {
 }
 
 func (ph *ProfileHandler) HandleShowProfile(c tele.Context) error {
-	err := c.Edit(c.Message().Text + "\n\n" + btnShowProfileText)
-	if err != nil {
-		return err
-	}
-
 	userID := c.Sender().ID
 
 	user, err := ph.db.GetUserByID(userID)

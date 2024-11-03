@@ -101,6 +101,30 @@ const (
 	btnSkipBanText          = "⏭️ Пропустить"
 )
 
+var btnTextMap = map[string]string{
+	btnWishLikeID:         btnWishLikeText,
+	btnWishDislikeID:      btnWishDislikeText,
+	btnWishReportID:       btnWishReportText,
+	btnSendWishYesID:      btnSendWishYesText,
+	btnSendWishNoID:       btnSendWishNoText,
+	btnKeepPlansID:        btnKeepPlansText,
+	btnUpdatePlansID:      btnUpdatePlansText,
+	btnNoWishID:           btnNoWishText,
+	btnShowProfileID:      btnShowProfileText,
+	btnChangeNameID:       btnChangeNameText,
+	btnChangeBioID:        btnChangeBioText,
+	btnChangeTimezoneID:   btnChangeTimezoneText,
+	btnChangePlansID:      btnChangePlansText,
+	btnChangeWakeTimeID:   btnChangeWakeTimeText,
+	btnChangeNotifyTimeID: btnChangeNotifyTimeText,
+	btnInviteFriendsID:    btnInviteFriendsText,
+	btnDoNothingID:        btnDoNothingText,
+	btnShowLinkID:         btnShowLinkText,
+	btnWarnUserID:         btnWarnUserText,
+	btnBanUserID:          btnBanUserText,
+	btnSkipBanID:          btnSkipBanText,
+}
+
 func NewBot(db *DB, stateMan *StateManager) *Bot {
 	bot := &Bot{
 		db:             db,
@@ -259,7 +283,16 @@ func (bot *Bot) handleCallback(c tele.Context) error {
 	handler, exists := bot.actionHandlers[action]
 	if !exists {
 		bot.log.Warnw("no handler for action", "action", action)
-		return c.Edit("Неизвестное действие. Пожалуйста, попробуйте еще раз.")
+		return c.Send("Неизвестное действие. Пожалуйста, попробуйте еще раз.")
+	}
+
+	// Add button text to the message if it exists in the map
+	if btnText, ok := btnTextMap[action]; ok {
+		msg := fmt.Sprintf("%s\n\n%s", c.Message().Text, btnText)
+		err := c.Edit(msg)
+		if err != nil {
+			bot.log.Warnw("failed to edit message with button text", "err", err)
+		}
 	}
 
 	err := handler.HandleAction(c, action)

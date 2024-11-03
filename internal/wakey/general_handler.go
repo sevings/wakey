@@ -32,11 +32,6 @@ func (gh *GeneralHandler) HandleAction(c tele.Context, action string) error {
 	inviteLink := "https://t.me/" + gh.name
 	switch action {
 	case btnInviteFriendsID:
-		err := c.Edit(c.Message().Text + "\n\n" + btnInviteFriendsText)
-		if err != nil {
-			return err
-		}
-
 		message := "Пригласите друзей присоединиться к нашему боту! Выберите способ:"
 
 		inlineKeyboard := &tele.ReplyMarkup{}
@@ -50,19 +45,9 @@ func (gh *GeneralHandler) HandleAction(c tele.Context, action string) error {
 
 		return c.Send(message, inlineKeyboard)
 	case btnShowLinkID:
-		err := c.Edit(c.Message().Text + "\n\n" + btnShowLinkText)
-		if err != nil {
-			return err
-		}
-
 		message := fmt.Sprintf("Вот ссылка для приглашения друзей:\n\n%s\n\nПросто скопируйте и отправьте её вашим друзьям!", inviteLink)
 		return c.Send(message)
 	case btnDoNothingID:
-		err := c.Edit(c.Message().Text + "\n\n" + btnDoNothingText)
-		if err != nil {
-			return err
-		}
-
 		return c.Send("Хорошо, до свидания! Если вам что-то понадобится, просто напишите мне.")
 	default:
 		gh.log.Errorw("unexpected action for GeneralHandler", "action", action)

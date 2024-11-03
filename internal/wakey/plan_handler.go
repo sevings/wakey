@@ -53,37 +53,17 @@ func (ph *PlanHandler) HandleAction(c tele.Context, action string) error {
 
 	switch action {
 	case btnChangePlansID:
-		err := c.Edit(c.Message().Text + "\n\n" + btnChangePlansText)
-		if err != nil {
-			return err
-		}
-
 		ph.stateMan.SetState(userID, StateUpdatingPlans)
 		return ph.askAboutPlans(c)
 	case btnChangeWakeTimeID:
-		err := c.Edit(c.Message().Text + "\n\n" + btnChangeWakeTimeText)
-		if err != nil {
-			return err
-		}
-
 		ph.stateMan.SetState(userID, StateUpdatingWakeTime)
 		return c.Send("Пожалуйста, введите новое время пробуждения в формате ЧЧ:ММ. Используйте команду /cancel для отмены.")
 	case btnChangeNotifyTimeID:
-		err := c.Edit(c.Message().Text + "\n\n" + btnChangeNotifyTimeText)
-		if err != nil {
-			return err
-		}
-
 		ph.stateMan.SetState(userID, StateUpdatingNotificationTime)
 		return c.Send("Пожалуйста, введите новое время уведомления в формате ЧЧ:ММ. " +
 			"Если вы хотите отключить уведомления, отправьте 'отключить'.\n" +
 			"Или используйте команду /cancel для отмены.")
 	case btnKeepPlansID:
-		err := c.Edit(c.Message().Text + "\n\n" + btnKeepPlansText)
-		if err != nil {
-			return err
-		}
-
 		plan, err := ph.db.CopyPlanForNextDay(userID)
 		if err != nil {
 			ph.log.Errorw("failed to copy plan for next day", "error", err, "userID", userID)
@@ -97,19 +77,9 @@ func (ph *PlanHandler) HandleAction(c tele.Context, action string) error {
 
 		return ph.askAboutWish(c)
 	case btnUpdatePlansID:
-		err := c.Edit(c.Message().Text + "\n\n" + btnUpdatePlansText)
-		if err != nil {
-			return err
-		}
-
 		ph.stateMan.SetState(userID, StateAwaitingPlans)
 		return ph.askAboutPlans(c)
 	case btnNoWishID:
-		err := c.Edit(c.Message().Text + "\n\n" + btnNoWishText)
-		if err != nil {
-			return err
-		}
-
 		ph.stateMan.ClearState(userID)
 		return c.Send("Хорошо, завтра вы не получите сообщение от другого пользователя.")
 	default:

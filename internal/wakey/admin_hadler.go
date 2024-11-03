@@ -46,7 +46,7 @@ func (ah *AdminHandler) HandleAction(c tele.Context, action string) error {
 		return nil
 	}
 
-	user, err := ah.handleAdminAction(c, action)
+	user, err := ah.handleAdminAction(c)
 	if user == nil {
 		return err
 	}
@@ -87,31 +87,14 @@ func (ah *AdminHandler) HandleState(c tele.Context, state UserState) error {
 	}
 }
 
-func (h *AdminHandler) handleAdminAction(c tele.Context, action string) (*User, error) {
+func (h *AdminHandler) handleAdminAction(c tele.Context) (*User, error) {
 	data := strings.Split(c.Data(), "|")
 	if len(data) != 2 {
 		return nil, fmt.Errorf("invalid data format")
 	}
 
-	userIDStr := data[1]
-
-	// Update message with button text
-	var btnText string
-	switch action {
-	case btnBanUserID:
-		btnText = btnBanUserText
-	case btnSkipBanID:
-		btnText = btnSkipBanText
-	case btnWarnUserID:
-		btnText = btnWarnUserText
-	}
-
-	err := c.Edit(c.Message().Text + "\n\n" + btnText)
-	if err != nil {
-		return nil, err
-	}
-
 	// Parse and validate user ID
+	userIDStr := data[1]
 	userID, err := strconv.ParseInt(userIDStr, 10, 64)
 	if err != nil {
 		h.log.Errorw("failed to parse user id", "error", err, "userID", userIDStr)
