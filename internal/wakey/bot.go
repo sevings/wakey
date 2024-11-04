@@ -14,7 +14,6 @@ type Bot struct {
 	api            BotAPI
 	db             *DB
 	stateManager   *StateManager
-	handlers       []BotHandler
 	actionHandlers map[string]BotHandler
 	stateHandlers  map[UserState]BotHandler
 	log            *zap.SugaredLogger
@@ -33,14 +32,6 @@ type BotHandler interface {
 	HandleAction(c tele.Context, action string) error
 	States() []UserState
 	HandleState(c tele.Context, state UserState) error
-}
-
-type APISetter interface {
-	SetAPI(api BotAPI)
-}
-
-type AdminSetter interface {
-	SetAdminID(adminID int64)
 }
 
 type JobID int64
@@ -137,34 +128,19 @@ func NewBot(db *DB, stateMan *StateManager) *Bot {
 	return bot
 }
 
-func (bot *Bot) Start(cfg Config, api BotAPI, wishSched, planSched Scheduler, botName string) {
+func (bot *Bot) Logger() *zap.SugaredLogger {
+	return bot.log
+}
+
+func (bot *Bot) Start(cfg Config, api BotAPI, handlers []BotHandler) {
 	bot.api = api
 
-	planHandler := NewPlanHandler(bot.db, planSched, wishSched, bot.stateManager, bot.log)
-	wishHandler := NewWishHandler(bot.db, wishSched, bot.stateManager, bot.log)
-	profileHandler := NewProfileHandler(bot.db, bot.stateManager, bot.log)
-	adminHandler := NewAdminHandler(bot.db, bot.stateManager, bot.log)
-	generalHandler := NewGeneralHandler(bot.db, bot.stateManager, bot.log, botName)
-	bot.handlers = []BotHandler{planHandler, wishHandler, profileHandler, adminHandler, generalHandler}
-
-	for _, handler := range bot.handlers {
+	for _, handler := range handlers {
 		for _, action := range handler.Actions() {
 			bot.actionHandlers[action] = handler
 		}
 		for _, state := range handler.States() {
 			bot.stateHandlers[state] = handler
-		}
-	}
-
-	for _, handler := range bot.handlers {
-		if apiSetter, ok := handler.(APISetter); ok {
-			apiSetter.SetAPI(api)
-		}
-	}
-
-	for _, handler := range bot.handlers {
-		if adminSetter, ok := handler.(AdminSetter); ok {
-			adminSetter.SetAdminID(cfg.AdminID)
 		}
 	}
 

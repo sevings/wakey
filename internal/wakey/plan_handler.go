@@ -18,8 +18,9 @@ type PlanHandler struct {
 	log       *zap.SugaredLogger
 }
 
-func NewPlanHandler(db *DB, planSched, wishSched Scheduler, stateMan *StateManager, log *zap.SugaredLogger) *PlanHandler {
+func NewPlanHandler(db *DB, api BotAPI, planSched, wishSched Scheduler, stateMan *StateManager, log *zap.SugaredLogger) *PlanHandler {
 	ph := &PlanHandler{
+		api:       api,
 		db:        db,
 		stateMan:  stateMan,
 		planSched: planSched,
@@ -31,10 +32,6 @@ func NewPlanHandler(db *DB, planSched, wishSched Scheduler, stateMan *StateManag
 	ph.ScheduleAllNotifications()
 
 	return ph
-}
-
-func (ph *PlanHandler) SetAPI(api BotAPI) {
-	ph.api = api
 }
 
 func (ph *PlanHandler) Actions() []string {

@@ -67,7 +67,14 @@ func main() {
 		logger.Panic(err)
 	}
 
-	bot.Start(cfg, api, wishSched, planSched, api.Me.Username)
+	planHandler := wakey.NewPlanHandler(db, api, planSched, wishSched, stateMan, bot.Logger())
+	wishHandler := wakey.NewWishHandler(db, api, wishSched, stateMan, bot.Logger(), cfg.AdminID)
+	profileHandler := wakey.NewProfileHandler(db, stateMan, bot.Logger())
+	adminHandler := wakey.NewAdminHandler(db, api, stateMan, bot.Logger(), cfg.AdminID)
+	generalHandler := wakey.NewGeneralHandler(db, stateMan, bot.Logger(), api.Me.Username)
+	handlers := []wakey.BotHandler{planHandler, wishHandler, profileHandler, adminHandler, generalHandler}
+
+	bot.Start(cfg, api, handlers)
 	defer bot.Stop()
 
 	quit := make(chan os.Signal, 1)

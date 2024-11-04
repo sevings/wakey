@@ -17,20 +17,14 @@ type AdminHandler struct {
 	log      *zap.SugaredLogger
 }
 
-func NewAdminHandler(db *DB, stateMan *StateManager, log *zap.SugaredLogger) *AdminHandler {
+func NewAdminHandler(db *DB, api BotAPI, stateMan *StateManager, log *zap.SugaredLogger, adminID int64) *AdminHandler {
 	return &AdminHandler{
 		db:       db,
 		stateMan: stateMan,
+		api:      api,
+		adm:      adminID,
 		log:      log,
 	}
-}
-
-func (ah *AdminHandler) SetAPI(api BotAPI) {
-	ah.api = api
-}
-
-func (ah *AdminHandler) SetAdminID(adminID int64) {
-	ah.adm = adminID
 }
 
 func (ah *AdminHandler) Actions() []string {

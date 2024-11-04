@@ -19,24 +19,18 @@ type WishHandler struct {
 	log      *zap.SugaredLogger
 }
 
-func NewWishHandler(db *DB, wishSched Scheduler, stateMan *StateManager, log *zap.SugaredLogger) *WishHandler {
+func NewWishHandler(db *DB, api BotAPI, wishSched Scheduler, stateMan *StateManager, log *zap.SugaredLogger, adminID int64) *WishHandler {
 	wh := &WishHandler{
 		db:       db,
+		api:      api,
 		stateMan: stateMan,
+		adm:      adminID,
 		log:      log,
 	}
 
 	wishSched.SetJobFunc(wh.SendWishes)
 
 	return wh
-}
-
-func (wh *WishHandler) SetAPI(api BotAPI) {
-	wh.api = api
-}
-
-func (wh *WishHandler) SetAdminID(adminID int64) {
-	wh.adm = adminID
 }
 
 func (wh *WishHandler) Actions() []string {
