@@ -2,6 +2,7 @@ package wakey
 
 import (
 	"errors"
+	"os"
 
 	"github.com/knadh/koanf/parsers/toml"
 	"github.com/knadh/koanf/providers/file"
@@ -15,6 +16,23 @@ type Config struct {
 	AdminID     int64 `koanf:"admin_id"`
 	MaxJobs     int   `koand:"max_jobs"`
 	MaxStateAge int   `koanf:"max_state_age"`
+	Moderation  ModerationConfig
+}
+
+type ModerationConfig struct {
+	LLM    LLMConfig `koanf:"llm"`
+	Prompt string
+	Temp   float64
+	MaxTok int `koanf:"max_tok"`
+}
+
+type LLMConfig struct {
+	Provider   LLMProvider
+	APIKey     string `koanf:"api_key"`
+	Model      string
+	BaseURL    string `koanf:"base_url"`
+	MaxRetries int    `koanf:"max_retries"`
+	Timeout    int
 }
 
 func LoadConfig() (Config, error) {
@@ -22,7 +40,12 @@ func LoadConfig() (Config, error) {
 
 	var cfg Config
 
-	err := kConf.Load(file.Provider("wakey.toml"), toml.Parser())
+	path := os.Getenv("WAKEY_CONFIG")
+	if path == "" {
+		path = "wakey.toml"
+	}
+
+	err := kConf.Load(file.Provider(path), toml.Parser())
 	if err != nil {
 		return cfg, err
 	}

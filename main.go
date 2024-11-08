@@ -36,6 +36,14 @@ func main() {
 		logger.Panic("can't load database")
 	}
 
+	moderator, err := wakey.NewMessageModerator(cfg.Moderation)
+	if err != nil {
+		logger.Panicf("Failed to initialize message moderator: %v", err)
+	}
+
+	toxicityChecker := wakey.NewToxicityChecker(db, moderator)
+	toxicityChecker.Start()
+
 	wishSched := wakey.NewSched(cfg.MaxJobs)
 	wishSched.Start()
 	defer wishSched.Stop()

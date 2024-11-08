@@ -5,3 +5,14 @@ release = false
 admin_id = 0
 max_jobs = 100
 max_state_age = 120
+
+[moderation]
+prompt = ""
+temp = 0.3
+max_tok = 2048
+
+[moderation.llm]
+provider = "openai"
+base_url = "https://api.groq.com/openai/v1"
+api_key = "your_groq_token"
+model = "llama-3.1-70b-versatile"

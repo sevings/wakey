@@ -1,6 +1,7 @@
 package wakey_test
 
 import (
+	"database/sql"
 	"testing"
 	"time"
 
@@ -500,6 +501,108 @@ func TestGetNewWishesByUserID(t *testing.T) {
 	newWishes, err = db.GetNewWishesByUserID(999)
 	require.NoError(t, err)
 	require.Empty(t, newWishes)
+}
+
+func TestWishToxicityOperations(t *testing.T) {
+	db := setupTestDB(t)
+
+	// Create a user and plan
+	user := &wakey.User{ID: 70, Name: "Toxicity Test User"}
+	err := db.CreateUser(user)
+	require.NoError(t, err)
+
+	plan := &wakey.Plan{
+		UserID:  user.ID,
+		Content: "Toxicity Test Plan",
+		WakeAt:  time.Now().Add(24 * time.Hour),
+	}
+	err = db.SavePlan(plan)
+	require.NoError(t, err)
+
+	// Create wishes with different toxicity values
+	wishes := []*wakey.Wish{
+		{
+			FromID:  71,
+			PlanID:  plan.ID,
+			Content: "Unrated Wish 1",
+			// Toxicity is NULL by default
+		},
+		{
+			FromID:  72,
+			PlanID:  plan.ID,
+			Content: "Rated Wish",
+			Toxicity: sql.NullInt16{
+				Int16: 75,
+				Valid: true,
+			},
+		},
+		{
+			FromID:  73,
+			PlanID:  plan.ID,
+			Content: "Zero Toxicity Wish",
+			Toxicity: sql.NullInt16{
+				Int16: 0,
+				Valid: true,
+			},
+		},
+		{
+			FromID:  74,
+			PlanID:  plan.ID,
+			Content: "Unrated Wish 2",
+			// Toxicity is NULL by default
+		},
+	}
+
+	for _, wish := range wishes {
+		err := db.SaveWish(wish)
+		require.NoError(t, err)
+	}
+
+	// Test GetUnratedWishes
+	unratedWishes, err := db.GetUnratedWishes()
+	require.NoError(t, err)
+	require.Len(t, unratedWishes, 2)
+
+	// Verify unrated wishes content
+	unratedContents := make(map[string]bool)
+	for _, wish := range unratedWishes {
+		unratedContents[wish.Content] = true
+		require.False(t, wish.Toxicity.Valid)
+	}
+	require.True(t, unratedContents["Unrated Wish 1"])
+	require.True(t, unratedContents["Unrated Wish 2"])
+	require.False(t, unratedContents["Rated Wish"])
+	require.False(t, unratedContents["Zero Toxicity Wish"])
+
+	// Test UpdateWishToxicity
+	err = db.UpdateWishToxicity(unratedWishes[0].ID, 50)
+	require.NoError(t, err)
+
+	// Verify the update
+	updatedWish, err := db.GetWishByID(unratedWishes[0].ID)
+	require.NoError(t, err)
+	require.True(t, updatedWish.Toxicity.Valid)
+	require.Equal(t, int16(50), updatedWish.Toxicity.Int16)
+
+	// Test updating non-existent wish
+	err = db.UpdateWishToxicity(999, 50)
+	require.Error(t, err)
+	require.Equal(t, wakey.ErrNotFound, err)
+
+	// Verify only one unrated wish remains
+	unratedWishes, err = db.GetUnratedWishes()
+	require.NoError(t, err)
+	require.Len(t, unratedWishes, 1)
+	require.Equal(t, "Unrated Wish 2", unratedWishes[0].Content)
+
+	// Test setting toxicity to zero
+	err = db.UpdateWishToxicity(unratedWishes[0].ID, 0)
+	require.NoError(t, err)
+
+	// Verify zero toxicity is different from unrated
+	unratedWishes, err = db.GetUnratedWishes()
+	require.NoError(t, err)
+	require.Len(t, unratedWishes, 0)
 }
 
 func TestGetStats(t *testing.T) {

@@ -1,6 +1,7 @@
 package wakey
 
 import (
+	"database/sql"
 	"fmt"
 	"strings"
 	"time"
@@ -49,10 +50,11 @@ const (
 
 type Wish struct {
 	gorm.Model
-	FromID  int64
-	PlanID  uint
-	Content string
-	State   WishState `gorm:"type:char(1);default:'N'"`
+	FromID   int64
+	PlanID   uint
+	Content  string
+	State    WishState `gorm:"type:char(1);default:'N'"`
+	Toxicity sql.NullInt16
 }
 
 type Stats struct {
@@ -385,6 +387,33 @@ func (db *DB) UpdateWishState(wishID uint, state WishState) error {
 	result := db.db.Model(&Wish{}).
 		Where("id = ?", wishID).
 		Update("state", state)
+
+	if result.Error != nil {
+		return result.Error
+	}
+
+	if result.RowsAffected == 0 {
+		return ErrNotFound
+	}
+
+	return nil
+}
+
+// GetUnratedWishes returns all wishes where toxicity is not set (equals 0)
+func (db *DB) GetUnratedWishes() ([]Wish, error) {
+	var wishes []Wish
+	result := db.db.Where("toxicity IS NULL").Find(&wishes)
+	if result.Error != nil {
+		return nil, result.Error
+	}
+	return wishes, nil
+}
+
+// UpdateWishToxicity updates the toxicity score for a specific wish
+func (db *DB) UpdateWishToxicity(wishID uint, toxicity int) error {
+	result := db.db.Model(&Wish{}).
+		Where("id = ?", wishID).
+		Update("toxicity", toxicity)
 
 	if result.Error != nil {
 		return result.Error
