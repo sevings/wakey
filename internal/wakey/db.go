@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/glebarez/sqlite"
@@ -14,8 +15,11 @@ import (
 var ErrNotFound = fmt.Errorf("record not found")
 
 type DB struct {
-	db  *gorm.DB
-	log *zap.SugaredLogger
+	db        *gorm.DB
+	log       *zap.SugaredLogger
+	wishSubs  map[int]chan *Wish
+	subMutex  sync.RWMutex
+	nextSubID int
 }
 
 type User struct {
@@ -96,7 +100,33 @@ func LoadDatabase(path string) (*DB, bool) {
 	return &DB{
 		db:  db,
 		log: log,
+
+		wishSubs: make(map[int]chan *Wish),
 	}, true
+}
+
+// SubscribeToWishes returns a channel for wish notifications and an unsubscribe function
+func (db *DB) SubscribeToWishes(bufSize int) (<-chan *Wish, func()) {
+	db.subMutex.Lock()
+	defer db.subMutex.Unlock()
+
+	id := db.nextSubID
+	db.nextSubID++
+
+	ch := make(chan *Wish, bufSize)
+	db.wishSubs[id] = ch
+
+	unsubscribe := func() {
+		db.subMutex.Lock()
+		defer db.subMutex.Unlock()
+
+		if ch, ok := db.wishSubs[id]; ok {
+			delete(db.wishSubs, id)
+			close(ch)
+		}
+	}
+
+	return ch, unsubscribe
 }
 
 func (db *DB) GetStats() (*Stats, error) {
@@ -352,7 +382,25 @@ func (db *DB) FindPlanForWish(senderID int64) (*Plan, error) {
 }
 
 func (db *DB) SaveWish(wish *Wish) error {
-	return db.db.Create(wish).Error
+	err := db.db.Create(wish).Error
+	if err != nil {
+		return err
+	}
+
+	// Notify subscribers
+	db.subMutex.RLock()
+	defer db.subMutex.RUnlock()
+
+	for id, ch := range db.wishSubs {
+		select {
+		case ch <- wish:
+			db.log.Debugf("Notified subscriber %d about wish %d", id, wish.ID)
+		default:
+			db.log.Warnf("Subscriber %d's channel is full, skipping notification for wish %d", id, wish.ID)
+		}
+	}
+
+	return nil
 }
 
 func (db *DB) GetWishByID(wishID uint) (*Wish, error) {

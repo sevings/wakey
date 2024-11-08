@@ -43,6 +43,7 @@ func main() {
 
 	toxicityChecker := wakey.NewToxicityChecker(db, moderator)
 	toxicityChecker.Start()
+	defer toxicityChecker.Stop()
 
 	wishSched := wakey.NewSched(cfg.MaxJobs)
 	wishSched.Start()

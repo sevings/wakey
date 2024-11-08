@@ -1,35 +1,59 @@
-// src/wakey/internal/wakey/toxicity.go
-
 package wakey
 
 import (
 	"context"
-	"math"
 	"time"
 
 	"go.uber.org/zap"
 )
 
 type ToxicityChecker struct {
-	db        *DB
-	moderator *MessageModerator
-	log       *zap.SugaredLogger
+	db     *DB
+	moder  *MessageModerator
+	log    *zap.SugaredLogger
+	quit   chan struct{}
+	wishCh <-chan *Wish
+	unsub  func()
 }
 
 func NewToxicityChecker(db *DB, moderator *MessageModerator) *ToxicityChecker {
+	wishChan, unsub := db.SubscribeToWishes(100)
 	return &ToxicityChecker{
-		db:        db,
-		moderator: moderator,
-		log:       zap.L().Named("toxicity").Sugar(),
+		db:     db,
+		moder:  moderator,
+		log:    zap.L().Named("toxicity").Sugar(),
+		quit:   make(chan struct{}),
+		wishCh: wishChan,
+		unsub:  unsub,
 	}
 }
 
 func (tc *ToxicityChecker) Start() {
 	go tc.processUnratedWishes()
+	go tc.processNewWishes()
+}
+
+func (tc *ToxicityChecker) Stop() {
+	close(tc.quit)
+	tc.unsub()
+}
+
+func (tc *ToxicityChecker) processNewWishes() {
+	tc.log.Info("Started processing new wishes")
+
+	for {
+		select {
+		case <-tc.quit:
+			tc.log.Info("Stopping new wish processor")
+			return
+		case wish := <-tc.wishCh:
+			tc.checkWishToxicity(wish)
+		}
+	}
 }
 
 func (tc *ToxicityChecker) processUnratedWishes() {
-	tc.log.Info("Starting toxicity check for unrated wishes")
+	tc.log.Info("Starting toxicity check for existing unrated wishes")
 
 	wishes, err := tc.db.GetUnratedWishes()
 	if err != nil {
@@ -44,33 +68,41 @@ func (tc *ToxicityChecker) processUnratedWishes() {
 
 	tc.log.Infof("Found %d unrated wishes to process", len(wishes))
 
-	ctx := context.Background()
 	for _, wish := range wishes {
-		// Create a timeout context for each wish
-		wishCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-
-		score, err := tc.moderator.CheckMessage(wishCtx, wish.Content)
-		cancel() // Cancel the context after the check
-
-		if err != nil {
-			tc.log.Errorf("Failed to check toxicity for wish %d: %v", wish.ID, err)
-			continue
+		select {
+		case <-tc.quit:
+			tc.log.Info("Stopping unrated wish processor")
+			return
+		default:
+			tc.checkWishToxicity(&wish)
 		}
-
-		// Convert score to int (0-100 range)
-		toxicityScore := int(math.Round(score * 100))
-
-		err = tc.db.UpdateWishToxicity(wish.ID, toxicityScore)
-		if err != nil {
-			tc.log.Errorf("Failed to update toxicity score for wish %d: %v", wish.ID, err)
-			continue
-		}
-
-		tc.log.Debugf("Updated toxicity score for wish %d: %d", wish.ID, toxicityScore)
-
-		// Add a small delay between requests to avoid overwhelming the API
-		time.Sleep(100 * time.Millisecond)
 	}
 
-	tc.log.Info("Completed toxicity check for unrated wishes")
+	tc.log.Info("Completed toxicity check for existing unrated wishes")
+}
+
+func (tc *ToxicityChecker) checkWishToxicity(wish *Wish) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	tc.log.Debugf("Checking toxicity for wish %d", wish.ID)
+
+	score, err := tc.moder.CheckMessage(ctx, wish.Content)
+	if err != nil {
+		tc.log.Errorf("Failed to check toxicity for wish %d: %v", wish.ID, err)
+		return
+	}
+
+	toxicityScore := int16(score * 100)
+
+	err = tc.db.UpdateWishToxicity(wish.ID, int(toxicityScore))
+	if err != nil {
+		tc.log.Errorf("Failed to update toxicity score for wish %d: %v", wish.ID, err)
+		return
+	}
+
+	tc.log.Debugf("Updated toxicity score for wish %d: %d", wish.ID, toxicityScore)
+
+	// Add a small delay between requests to avoid overwhelming the API
+	time.Sleep(100 * time.Millisecond)
 }
