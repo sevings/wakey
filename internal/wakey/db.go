@@ -19,6 +19,7 @@ type DB struct {
 	log       *zap.SugaredLogger
 	wishSubs  map[int]chan *Wish
 	toxicSubs map[int]chan *Wish
+	stateSubs map[int]chan *Wish
 	subMutex  sync.RWMutex
 	nextSubID int
 }
@@ -104,6 +105,7 @@ func LoadDatabase(path string) (*DB, bool) {
 
 		wishSubs:  make(map[int]chan *Wish),
 		toxicSubs: make(map[int]chan *Wish),
+		stateSubs: make(map[int]chan *Wish),
 	}, true
 }
 
@@ -122,6 +124,12 @@ func (db *DB) Stop() {
 	for id, ch := range db.toxicSubs {
 		close(ch)
 		delete(db.toxicSubs, id)
+	}
+
+	// Close all state subscription channels
+	for id, ch := range db.stateSubs {
+		close(ch)
+		delete(db.stateSubs, id)
 	}
 }
 
@@ -166,6 +174,30 @@ func (db *DB) SubscribeToToxicity(bufSize int) (<-chan *Wish, func()) {
 
 		if ch, ok := db.toxicSubs[id]; ok {
 			delete(db.toxicSubs, id)
+			close(ch)
+		}
+	}
+
+	return ch, unsubscribe
+}
+
+// SubscribeToStateUpdates returns a channel for wish state update notifications and an unsubscribe function
+func (db *DB) SubscribeToStateUpdates(bufSize int) (<-chan *Wish, func()) {
+	db.subMutex.Lock()
+	defer db.subMutex.Unlock()
+
+	id := db.nextSubID
+	db.nextSubID++
+
+	ch := make(chan *Wish, bufSize)
+	db.stateSubs[id] = ch
+
+	unsubscribe := func() {
+		db.subMutex.Lock()
+		defer db.subMutex.Unlock()
+
+		if ch, ok := db.stateSubs[id]; ok {
+			delete(db.stateSubs, id)
 			close(ch)
 		}
 	}
@@ -476,16 +508,39 @@ func (db *DB) GetNewWishesByUserID(userID int64) ([]Wish, error) {
 }
 
 func (db *DB) UpdateWishState(wishID uint, state WishState) error {
-	result := db.db.Model(&Wish{}).
-		Where("id = ?", wishID).
-		Update("state", state)
-
+	// First get the wish to send in notification
+	var wish Wish
+	result := db.db.Where("id = ?", wishID).First(&wish)
 	if result.Error != nil {
+		if result.Error == gorm.ErrRecordNotFound {
+			return ErrNotFound
+		}
 		return result.Error
 	}
 
+	// Update state
+	result = db.db.Model(&wish).Update("state", state)
+	if result.Error != nil {
+		return result.Error
+	}
 	if result.RowsAffected == 0 {
 		return ErrNotFound
+	}
+
+	// Update the wish object with new state
+	wish.State = state
+
+	// Notify subscribers
+	db.subMutex.RLock()
+	defer db.subMutex.RUnlock()
+
+	for id, ch := range db.stateSubs {
+		select {
+		case ch <- &wish:
+			db.log.Debugf("Notified state subscriber %d about wish %d", id, wish.ID)
+		default:
+			db.log.Warnf("State subscriber %d's channel is full, skipping notification for wish %d", id, wish.ID)
+		}
 	}
 
 	return nil

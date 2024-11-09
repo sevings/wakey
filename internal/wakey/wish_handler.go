@@ -15,16 +15,14 @@ type WishHandler struct {
 	db       *DB
 	api      BotAPI
 	stateMan *StateManager
-	adm      int64
 	log      *zap.SugaredLogger
 }
 
-func NewWishHandler(db *DB, api BotAPI, wishSched Scheduler, stateMan *StateManager, log *zap.SugaredLogger, adminID int64) *WishHandler {
+func NewWishHandler(db *DB, api BotAPI, wishSched Scheduler, stateMan *StateManager, log *zap.SugaredLogger) *WishHandler {
 	wh := &WishHandler{
 		db:       db,
 		api:      api,
 		stateMan: stateMan,
-		adm:      adminID,
 		log:      log,
 	}
 
@@ -146,30 +144,10 @@ func (wh *WishHandler) HandleWishDislike(c tele.Context) error {
 }
 
 func (wh *WishHandler) HandleWishReport(c tele.Context, wish *Wish) error {
-	// Update wish state
 	err := wh.db.UpdateWishState(wish.ID, WishStateReported)
 	if err != nil {
 		wh.log.Errorw("failed to update wish state", "error", err, "wishID", wish.ID)
 		return c.Send("Извините, произошла ошибка. Пожалуйста, попробуйте позже.")
-	}
-
-	if wh.adm != 0 {
-		reportMsg := fmt.Sprintf("Жалоба на сообщение:\n\nАвтор ID: %d\nТекст сообщения: %s", wish.FromID, wish.Content)
-
-		inlineKeyboard := &tele.ReplyMarkup{}
-		btnWarn := inlineKeyboard.Data(btnWarnUserText, btnWarnUserID, fmt.Sprintf("%d", wish.FromID))
-		btnBan := inlineKeyboard.Data(btnBanUserText, btnBanUserID, fmt.Sprintf("%d", wish.FromID))
-		btnSkip := inlineKeyboard.Data(btnSkipBanText, btnSkipBanID, fmt.Sprintf("%d", wish.FromID))
-		inlineKeyboard.Inline(
-			inlineKeyboard.Row(btnWarn),
-			inlineKeyboard.Row(btnBan),
-			inlineKeyboard.Row(btnSkip),
-		)
-
-		_, err := wh.api.Send(tele.ChatID(wh.adm), reportMsg, inlineKeyboard)
-		if err != nil {
-			wh.log.Errorw("failed to send report to admin", "error", err)
-		}
 	}
 
 	return c.Send("Жалоба на сообщение отправлена.")

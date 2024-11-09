@@ -30,6 +30,10 @@ func NewAdminHandler(db *DB, api BotAPI, stateMan *StateManager, log *zap.Sugare
 	toxicCh, _ := db.SubscribeToToxicity(100)
 	go ah.monitorToxicity(toxicCh, maxToxic)
 
+	// Subscribe to wish state updates
+	stateCh, _ := db.SubscribeToStateUpdates(100)
+	go ah.monitorWishStates(stateCh)
+
 	return ah
 }
 
@@ -232,5 +236,44 @@ func (ah *AdminHandler) notifyAdminAboutToxicWish(wish *Wish) {
 			"wishID", wish.ID,
 			"fromID", wish.FromID,
 			"toxicity", wish.Toxicity.Int16)
+	}
+}
+
+func (ah *AdminHandler) monitorWishStates(ch <-chan *Wish) {
+	for wish := range ch {
+		if wish.State == WishStateReported {
+			ah.notifyAdminAboutReportedWish(wish)
+		}
+	}
+}
+
+func (ah *AdminHandler) notifyAdminAboutReportedWish(wish *Wish) {
+	// Create inline keyboard
+	inlineKeyboard := &tele.ReplyMarkup{}
+	btnWarn := inlineKeyboard.Data(btnWarnUserText, btnWarnUserID, fmt.Sprintf("%d", wish.FromID))
+	btnBan := inlineKeyboard.Data(btnBanUserID, btnBanUserID, fmt.Sprintf("%d", wish.FromID))
+	btnSkip := inlineKeyboard.Data(btnSkipBanText, btnSkipBanID, fmt.Sprintf("%d", wish.FromID))
+	inlineKeyboard.Inline(
+		inlineKeyboard.Row(btnWarn),
+		inlineKeyboard.Row(btnBan),
+		inlineKeyboard.Row(btnSkip),
+	)
+
+	message := fmt.Sprintf(
+		"🚫 Жалоба на сообщение\n\n"+
+			"От пользователя: %d\n"+
+			"Уровень токсичности: %d%%\n"+
+			"Текст: %s",
+		wish.FromID,
+		wish.Toxicity.Int16,
+		wish.Content,
+	)
+
+	_, err := ah.api.Send(tele.ChatID(ah.adm), message, inlineKeyboard)
+	if err != nil {
+		ah.log.Errorw("failed to notify admin about reported wish",
+			"error", err,
+			"wishID", wish.ID,
+			"fromID", wish.FromID)
 	}
 }

@@ -378,6 +378,98 @@ func TestToxicitySubscriptions(t *testing.T) {
 	}
 }
 
+func TestWishStateSubscriptions(t *testing.T) {
+	db := setupTestDB(t)
+
+	// Create test data
+	user := &wakey.User{ID: 100, Name: "State Sub Test User"}
+	err := db.CreateUser(user)
+	require.NoError(t, err)
+
+	plan := &wakey.Plan{
+		UserID:  user.ID,
+		Content: "State Sub Test Plan",
+		WakeAt:  time.Now().Add(24 * time.Hour),
+	}
+	err = db.SavePlan(plan)
+	require.NoError(t, err)
+
+	wish := &wakey.Wish{
+		FromID:  101,
+		PlanID:  plan.ID,
+		Content: "State Sub Test Wish",
+	}
+	err = db.SaveWish(wish)
+	require.NoError(t, err)
+
+	// Create multiple subscribers
+	ch1, unsub1 := db.SubscribeToStateUpdates(10)
+	defer unsub1()
+
+	ch2, unsub2 := db.SubscribeToStateUpdates(10)
+	defer unsub2()
+
+	// Create channels to signal test completion
+	done1 := make(chan bool)
+	done2 := make(chan bool)
+
+	var received1, received2 *wakey.Wish
+	go func() {
+		select {
+		case wish := <-ch1:
+			received1 = wish
+			done1 <- true
+		case <-time.After(2 * time.Second):
+			done1 <- false
+		}
+	}()
+
+	go func() {
+		select {
+		case wish := <-ch2:
+			received2 = wish
+			done2 <- true
+		case <-time.After(2 * time.Second):
+			done2 <- false
+		}
+	}()
+
+	// Update wish state
+	err = db.UpdateWishState(wish.ID, wakey.WishStateLiked)
+	require.NoError(t, err)
+
+	// Wait for notifications
+	success1 := <-done1
+	success2 := <-done2
+
+	require.True(t, success1, "Subscriber 1 did not receive notification")
+	require.True(t, success2, "Subscriber 2 did not receive notification")
+
+	require.Equal(t, wish.ID, received1.ID)
+	require.Equal(t, wish.ID, received2.ID)
+	require.Equal(t, wakey.WishStateLiked, received1.State)
+	require.Equal(t, wakey.WishStateLiked, received2.State)
+
+	// Test unsubscribe
+	unsub1()
+
+	// Update state again
+	err = db.UpdateWishState(wish.ID, wakey.WishStateDisliked)
+	require.NoError(t, err)
+
+	// Check that ch1 is closed
+	_, ok := <-ch1
+	require.False(t, ok, "Unsubscribed channel should be closed")
+
+	// Only subscriber 2 should receive the update
+	select {
+	case wish := <-ch2:
+		require.Equal(t, wakey.WishStateDisliked, wish.State)
+	case <-time.After(2 * time.Second):
+		t.Error("Subscriber 2 did not receive second notification")
+	}
+}
+
 func TestWishOperations(t *testing.T) {
 	db := setupTestDB(t)
 

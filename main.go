@@ -78,7 +78,7 @@ func main() {
 	}
 
 	planHandler := wakey.NewPlanHandler(db, api, planSched, wishSched, stateMan, bot.Logger())
-	wishHandler := wakey.NewWishHandler(db, api, wishSched, stateMan, bot.Logger(), cfg.AdminID)
+	wishHandler := wakey.NewWishHandler(db, api, wishSched, stateMan, bot.Logger())
 	profileHandler := wakey.NewProfileHandler(db, stateMan, bot.Logger())
 	adminHandler := wakey.NewAdminHandler(db, api, stateMan, bot.Logger(), cfg.AdminID, cfg.MaxToxic)
 	generalHandler := wakey.NewGeneralHandler(db, stateMan, bot.Logger(), api.Me.Username)
