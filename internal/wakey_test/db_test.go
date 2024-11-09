@@ -193,94 +193,189 @@ func TestCopyPlanForNextDay(t *testing.T) {
 }
 
 func TestWishSubscriptions(t *testing.T) {
-    db := setupTestDB(t)
+	db := setupTestDB(t)
 
-    // Create test data
-    user := &wakey.User{ID: 80, Name: "Sub Test User"}
-    err := db.CreateUser(user)
-    require.NoError(t, err)
+	// Create test data
+	user := &wakey.User{ID: 80, Name: "Sub Test User"}
+	err := db.CreateUser(user)
+	require.NoError(t, err)
 
-    plan := &wakey.Plan{
-        UserID:  user.ID,
-        Content: "Sub Test Plan",
-        WakeAt:  time.Now().Add(24 * time.Hour),
-    }
-    err = db.SavePlan(plan)
-    require.NoError(t, err)
+	plan := &wakey.Plan{
+		UserID:  user.ID,
+		Content: "Sub Test Plan",
+		WakeAt:  time.Now().Add(24 * time.Hour),
+	}
+	err = db.SavePlan(plan)
+	require.NoError(t, err)
 
-    // Create multiple subscribers
-    ch1, unsub1 := db.SubscribeToWishes(10)
-    defer unsub1()
+	// Create multiple subscribers
+	ch1, unsub1 := db.SubscribeToWishes(10)
+	defer unsub1()
 
-    ch2, unsub2 := db.SubscribeToWishes(10)
-    defer unsub2()
+	ch2, unsub2 := db.SubscribeToWishes(10)
+	defer unsub2()
 
-    // Create channels to signal test completion
-    done1 := make(chan bool)
-    done2 := make(chan bool)
+	// Create channels to signal test completion
+	done1 := make(chan bool)
+	done2 := make(chan bool)
 
-    // Start goroutines to listen for wish notifications
-    var received1, received2 *wakey.Wish
-    go func() {
-        select {
-        case wish := <-ch1:
-            received1 = wish
-            done1 <- true
-        case <-time.After(2 * time.Second):
-            done1 <- false
-        }
-    }()
+	// Start goroutines to listen for wish notifications
+	var received1, received2 *wakey.Wish
+	go func() {
+		select {
+		case wish := <-ch1:
+			received1 = wish
+			done1 <- true
+		case <-time.After(2 * time.Second):
+			done1 <- false
+		}
+	}()
 
-    go func() {
-        select {
-        case wish := <-ch2:
-            received2 = wish
-            done2 <- true
-        case <-time.After(2 * time.Second):
-            done2 <- false
-        }
-    }()
+	go func() {
+		select {
+		case wish := <-ch2:
+			received2 = wish
+			done2 <- true
+		case <-time.After(2 * time.Second):
+			done2 <- false
+		}
+	}()
 
-    // Create a new wish
-    wish := &wakey.Wish{
-        FromID:  81,
-        PlanID:  plan.ID,
-        Content: "Sub Test Wish",
-    }
-    err = db.SaveWish(wish)
-    require.NoError(t, err)
+	// Create a new wish
+	wish := &wakey.Wish{
+		FromID:  81,
+		PlanID:  plan.ID,
+		Content: "Sub Test Wish",
+	}
+	err = db.SaveWish(wish)
+	require.NoError(t, err)
 
-    // Wait for notifications
-    success1 := <-done1
-    success2 := <-done2
+	// Wait for notifications
+	success1 := <-done1
+	success2 := <-done2
 
-    require.True(t, success1, "Subscriber 1 did not receive notification")
-    require.True(t, success2, "Subscriber 2 did not receive notification")
+	require.True(t, success1, "Subscriber 1 did not receive notification")
+	require.True(t, success2, "Subscriber 2 did not receive notification")
 
-    require.Equal(t, wish.ID, received1.ID)
-    require.Equal(t, wish.ID, received2.ID)
+	require.Equal(t, wish.ID, received1.ID)
+	require.Equal(t, wish.ID, received2.ID)
 
-    // Test unsubscribe
-    unsub1()
+	// Test unsubscribe
+	unsub1()
 
-    // Create another wish
-    wish2 := &wakey.Wish{
-        FromID:  81,
-        PlanID:  plan.ID,
-        Content: "Sub Test Wish 2",
-    }
-    err = db.SaveWish(wish2)
-    require.NoError(t, err)
+	// Create another wish
+	wish2 := &wakey.Wish{
+		FromID:  81,
+		PlanID:  plan.ID,
+		Content: "Sub Test Wish 2",
+	}
+	err = db.SaveWish(wish2)
+	require.NoError(t, err)
 
-    // Only subscriber 2 should receive it
-    select {
-    case <-ch1:
-        t.Error("Unsubscribed channel should not receive notifications")
-    case wish := <-ch2:
-        require.Equal(t, wish2.ID, wish.ID)
-    case <-time.After(2 * time.Second):
-        t.Error("Subscriber 2 did not receive second notification")
-    }
+	// Check that ch1 is closed
+	_, ok := <-ch1
+	require.False(t, ok, "Unsubscribed channel should be closed")
+
+	// Only subscriber 2 should receive the update
+	select {
+	case wish := <-ch2:
+		require.Equal(t, wish2.ID, wish.ID)
+	case <-time.After(2 * time.Second):
+		t.Error("Subscriber 2 did not receive second notification")
+	}
+}
+
+func TestToxicitySubscriptions(t *testing.T) {
+	db := setupTestDB(t)
+
+	// Create test data
+	user := &wakey.User{ID: 90, Name: "Toxicity Sub Test User"}
+	err := db.CreateUser(user)
+	require.NoError(t, err)
+
+	plan := &wakey.Plan{
+		UserID:  user.ID,
+		Content: "Toxicity Sub Test Plan",
+		WakeAt:  time.Now().Add(24 * time.Hour),
+	}
+	err = db.SavePlan(plan)
+	require.NoError(t, err)
+
+	wish := &wakey.Wish{
+		FromID:  91,
+		PlanID:  plan.ID,
+		Content: "Toxicity Sub Test Wish",
+	}
+	err = db.SaveWish(wish)
+	require.NoError(t, err)
+
+	// Create multiple subscribers
+	ch1, unsub1 := db.SubscribeToToxicity(10)
+	defer unsub1()
+
+	ch2, unsub2 := db.SubscribeToToxicity(10)
+	defer unsub2()
+
+	// Create channels to signal test completion
+	done1 := make(chan bool)
+	done2 := make(chan bool)
+
+	// Start goroutines to listen for toxicity update notifications
+	var received1, received2 *wakey.Wish
+	go func() {
+		select {
+		case wish := <-ch1:
+			received1 = wish
+			done1 <- true
+		case <-time.After(2 * time.Second):
+			done1 <- false
+		}
+	}()
+
+	go func() {
+		select {
+		case wish := <-ch2:
+			received2 = wish
+			done2 <- true
+		case <-time.After(2 * time.Second):
+			done2 <- false
+		}
+	}()
+
+	// Update toxicity
+	err = db.UpdateWishToxicity(wish.ID, 75)
+	require.NoError(t, err)
+
+	// Wait for notifications
+	success1 := <-done1
+	success2 := <-done2
+
+	require.True(t, success1, "Subscriber 1 did not receive notification")
+	require.True(t, success2, "Subscriber 2 did not receive notification")
+
+	require.Equal(t, wish.ID, received1.ID)
+	require.Equal(t, wish.ID, received2.ID)
+	require.Equal(t, int16(75), received1.Toxicity.Int16)
+	require.Equal(t, int16(75), received2.Toxicity.Int16)
+
+	// Test unsubscribe
+	unsub1()
+
+	// Create another toxicity update
+	err = db.UpdateWishToxicity(wish.ID, 50)
+	require.NoError(t, err)
+
+	// Check that ch1 is closed
+	_, ok := <-ch1
+	require.False(t, ok, "Unsubscribed channel should be closed")
+
+	// Only subscriber 2 should receive the update
+	select {
+	case wish := <-ch2:
+		require.Equal(t, int16(50), wish.Toxicity.Int16)
+	case <-time.After(2 * time.Second):
+		t.Error("Subscriber 2 did not receive second notification")
+	}
 }
 
 func TestWishOperations(t *testing.T) {
@@ -915,4 +1010,32 @@ func TestDBStates(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, len(loadedStates))
 	require.Contains(t, loadedStates, int64(3))
+}
+
+func TestDBStop(t *testing.T) {
+	db := setupTestDB(t)
+
+	// Create multiple subscribers for both wish and toxicity updates
+	wishCh1, _ := db.SubscribeToWishes(10)
+	wishCh2, _ := db.SubscribeToWishes(10)
+	toxCh1, _ := db.SubscribeToToxicity(10)
+	toxCh2, _ := db.SubscribeToToxicity(10)
+
+	// Stop the database
+	db.Stop()
+
+	// Verify all channels are closed
+	checkChannelClosed := func(ch <-chan *wakey.Wish) bool {
+		select {
+		case _, ok := <-ch:
+			return !ok
+		default:
+			return false
+		}
+	}
+
+	require.True(t, checkChannelClosed(wishCh1), "Wish channel 1 should be closed")
+	require.True(t, checkChannelClosed(wishCh2), "Wish channel 2 should be closed")
+	require.True(t, checkChannelClosed(toxCh1), "Toxicity channel 1 should be closed")
+	require.True(t, checkChannelClosed(toxCh2), "Toxicity channel 2 should be closed")
 }

@@ -16,6 +16,7 @@ type Config struct {
 	AdminID     int64 `koanf:"admin_id"`
 	MaxJobs     int   `koand:"max_jobs"`
 	MaxStateAge int   `koanf:"max_state_age"`
+	MaxToxic    int16 `koanf:"max_toxic"`
 	Moderation  ModerationConfig
 }
 

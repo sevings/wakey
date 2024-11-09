@@ -5,6 +5,7 @@ release = false
 admin_id = 0
 max_jobs = 100
 max_state_age = 120
+max_toxic = 70                       # 0 .. 100
 
 [moderation]
 prompt = ""

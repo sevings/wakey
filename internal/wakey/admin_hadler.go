@@ -17,14 +17,20 @@ type AdminHandler struct {
 	log      *zap.SugaredLogger
 }
 
-func NewAdminHandler(db *DB, api BotAPI, stateMan *StateManager, log *zap.SugaredLogger, adminID int64) *AdminHandler {
-	return &AdminHandler{
+func NewAdminHandler(db *DB, api BotAPI, stateMan *StateManager, log *zap.SugaredLogger, adminID int64, maxToxic int16) *AdminHandler {
+	ah := &AdminHandler{
 		db:       db,
 		stateMan: stateMan,
 		api:      api,
 		adm:      adminID,
 		log:      log,
 	}
+
+	// Subscribe to toxicity updates
+	toxicCh, _ := db.SubscribeToToxicity(100)
+	go ah.monitorToxicity(toxicCh, maxToxic)
+
+	return ah
 }
 
 func (ah *AdminHandler) Actions() []string {
@@ -183,4 +189,48 @@ func (ah *AdminHandler) handleNotification(c tele.Context) error {
 		successCount,
 		failCount,
 	))
+}
+
+func (ah *AdminHandler) monitorToxicity(ch <-chan *Wish, threshold int16) {
+	for wish := range ch {
+		if !wish.Toxicity.Valid {
+			continue
+		}
+
+		if wish.Toxicity.Int16 >= threshold {
+			ah.notifyAdminAboutToxicWish(wish)
+		}
+	}
+}
+
+func (ah *AdminHandler) notifyAdminAboutToxicWish(wish *Wish) {
+	// Create inline keyboard
+	inlineKeyboard := &tele.ReplyMarkup{}
+	btnWarn := inlineKeyboard.Data(btnWarnUserText, btnWarnUserID, fmt.Sprintf("%d", wish.FromID))
+	btnBan := inlineKeyboard.Data(btnBanUserText, btnBanUserID, fmt.Sprintf("%d", wish.FromID))
+	btnSkip := inlineKeyboard.Data(btnSkipBanText, btnSkipBanID, fmt.Sprintf("%d", wish.FromID))
+	inlineKeyboard.Inline(
+		inlineKeyboard.Row(btnWarn),
+		inlineKeyboard.Row(btnBan),
+		inlineKeyboard.Row(btnSkip),
+	)
+
+	message := fmt.Sprintf(
+		"⚠️ Обнаружено токсичное сообщение\n\n"+
+			"От пользователя: %d\n"+
+			"Уровень токсичности: %d%%\n"+
+			"Текст: %s",
+		wish.FromID,
+		wish.Toxicity.Int16,
+		wish.Content,
+	)
+
+	_, err := ah.api.Send(tele.ChatID(ah.adm), message, inlineKeyboard)
+	if err != nil {
+		ah.log.Errorw("failed to notify admin about toxic wish",
+			"error", err,
+			"wishID", wish.ID,
+			"fromID", wish.FromID,
+			"toxicity", wish.Toxicity.Int16)
+	}
 }

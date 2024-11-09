@@ -35,6 +35,7 @@ func main() {
 	if !ok {
 		logger.Panic("can't load database")
 	}
+	defer db.Stop()
 
 	moderator, err := wakey.NewMessageModerator(cfg.Moderation)
 	if err != nil {
@@ -79,7 +80,7 @@ func main() {
 	planHandler := wakey.NewPlanHandler(db, api, planSched, wishSched, stateMan, bot.Logger())
 	wishHandler := wakey.NewWishHandler(db, api, wishSched, stateMan, bot.Logger(), cfg.AdminID)
 	profileHandler := wakey.NewProfileHandler(db, stateMan, bot.Logger())
-	adminHandler := wakey.NewAdminHandler(db, api, stateMan, bot.Logger(), cfg.AdminID)
+	adminHandler := wakey.NewAdminHandler(db, api, stateMan, bot.Logger(), cfg.AdminID, cfg.MaxToxic)
 	generalHandler := wakey.NewGeneralHandler(db, stateMan, bot.Logger(), api.Me.Username)
 	handlers := []wakey.BotHandler{planHandler, wishHandler, profileHandler, adminHandler, generalHandler}
 

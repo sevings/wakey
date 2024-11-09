@@ -18,6 +18,7 @@ type DB struct {
 	db        *gorm.DB
 	log       *zap.SugaredLogger
 	wishSubs  map[int]chan *Wish
+	toxicSubs map[int]chan *Wish
 	subMutex  sync.RWMutex
 	nextSubID int
 }
@@ -101,8 +102,27 @@ func LoadDatabase(path string) (*DB, bool) {
 		db:  db,
 		log: log,
 
-		wishSubs: make(map[int]chan *Wish),
+		wishSubs:  make(map[int]chan *Wish),
+		toxicSubs: make(map[int]chan *Wish),
 	}, true
+}
+
+// Stop closes all subscription channels and performs cleanup
+func (db *DB) Stop() {
+	db.subMutex.Lock()
+	defer db.subMutex.Unlock()
+
+	// Close all wish subscription channels
+	for id, ch := range db.wishSubs {
+		close(ch)
+		delete(db.wishSubs, id)
+	}
+
+	// Close all toxicity subscription channels
+	for id, ch := range db.toxicSubs {
+		close(ch)
+		delete(db.toxicSubs, id)
+	}
 }
 
 // SubscribeToWishes returns a channel for wish notifications and an unsubscribe function
@@ -122,6 +142,30 @@ func (db *DB) SubscribeToWishes(bufSize int) (<-chan *Wish, func()) {
 
 		if ch, ok := db.wishSubs[id]; ok {
 			delete(db.wishSubs, id)
+			close(ch)
+		}
+	}
+
+	return ch, unsubscribe
+}
+
+// SubscribeToToxicity returns a channel for wish toxicity update notifications and an unsubscribe function
+func (db *DB) SubscribeToToxicity(bufSize int) (<-chan *Wish, func()) {
+	db.subMutex.Lock()
+	defer db.subMutex.Unlock()
+
+	id := db.nextSubID
+	db.nextSubID++
+
+	ch := make(chan *Wish, bufSize)
+	db.toxicSubs[id] = ch
+
+	unsubscribe := func() {
+		db.subMutex.Lock()
+		defer db.subMutex.Unlock()
+
+		if ch, ok := db.toxicSubs[id]; ok {
+			delete(db.toxicSubs, id)
 			close(ch)
 		}
 	}
@@ -459,16 +503,39 @@ func (db *DB) GetUnratedWishes() ([]Wish, error) {
 
 // UpdateWishToxicity updates the toxicity score for a specific wish
 func (db *DB) UpdateWishToxicity(wishID uint, toxicity int) error {
-	result := db.db.Model(&Wish{}).
-		Where("id = ?", wishID).
-		Update("toxicity", toxicity)
-
+	// First get the wish to send in notification
+	var wish Wish
+	result := db.db.Where("id = ?", wishID).First(&wish)
 	if result.Error != nil {
+		if result.Error == gorm.ErrRecordNotFound {
+			return ErrNotFound
+		}
 		return result.Error
 	}
 
+	// Update toxicity
+	result = db.db.Model(&wish).Update("toxicity", toxicity)
+	if result.Error != nil {
+		return result.Error
+	}
 	if result.RowsAffected == 0 {
 		return ErrNotFound
+	}
+
+	// Update the wish object with new toxicity value
+	wish.Toxicity = sql.NullInt16{Int16: int16(toxicity), Valid: true}
+
+	// Notify subscribers
+	db.subMutex.RLock()
+	defer db.subMutex.RUnlock()
+
+	for id, ch := range db.toxicSubs {
+		select {
+		case ch <- &wish:
+			db.log.Debugf("Notified toxicity subscriber %d about wish %d", id, wish.ID)
+		default:
+			db.log.Warnf("Toxicity subscriber %d's channel is full, skipping notification for wish %d", id, wish.ID)
+		}
 	}
 
 	return nil
