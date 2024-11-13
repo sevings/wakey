@@ -94,8 +94,7 @@ func (m *MessageModerator) CheckMessage(ctx context.Context, message string) (fl
 
 		// Check if it's a rate limit error
 		if timeout, ok := parseRateLimit(err); ok {
-			// Add a small buffer to the timeout
-			waitTime = time.Duration(timeout*1000+100) * time.Millisecond
+			waitTime = timeout
 		} else if isServiceUnavailable(err) {
 			// Wait 3 seconds for service unavailable errors
 			waitTime = 3 * time.Second
@@ -118,19 +117,20 @@ func (m *MessageModerator) CheckMessage(ctx context.Context, message string) (fl
 	return 0, fmt.Errorf("max retries exceeded, last error: %w", lastErr)
 }
 
-func parseRateLimit(err error) (float64, bool) {
-	re := regexp.MustCompile(`Please try again in (\d+\.?\d*)s`)
+func parseRateLimit(err error) (time.Duration, bool) {
+	re := regexp.MustCompile(`Please try again in\s+(\d+)`)
 	match := re.FindStringSubmatch(err.Error())
 	if len(match) < 2 {
 		return 0, false
 	}
 
-	timeout, err := strconv.ParseFloat(match[1], 64)
+	timeout, err := strconv.ParseInt(match[1], 10, 64)
 	if err != nil {
 		return 0, false
 	}
 
-	return timeout, true
+	timeout++
+	return time.Duration(timeout) * time.Second, true
 }
 
 func isServiceUnavailable(err error) bool {

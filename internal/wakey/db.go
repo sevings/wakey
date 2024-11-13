@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/glebarez/sqlite"
@@ -17,11 +16,9 @@ var ErrNotFound = fmt.Errorf("record not found")
 type DB struct {
 	db        *gorm.DB
 	log       *zap.SugaredLogger
-	wishSubs  map[int]chan *Wish
-	toxicSubs map[int]chan *Wish
-	stateSubs map[int]chan *Wish
-	subMutex  sync.RWMutex
-	nextSubID int
+	wishSubs  *SubscriptionManager
+    toxicSubs *SubscriptionManager
+    stateSubs *SubscriptionManager
 }
 
 type User struct {
@@ -103,106 +100,32 @@ func LoadDatabase(path string) (*DB, bool) {
 		db:  db,
 		log: log,
 
-		wishSubs:  make(map[int]chan *Wish),
-		toxicSubs: make(map[int]chan *Wish),
-		stateSubs: make(map[int]chan *Wish),
+		wishSubs:  NewSubscriptionManager("wish", log),
+        toxicSubs: NewSubscriptionManager("toxicity", log),
+        stateSubs: NewSubscriptionManager("state", log),
 	}, true
 }
 
 // Stop closes all subscription channels and performs cleanup
 func (db *DB) Stop() {
-	db.subMutex.Lock()
-	defer db.subMutex.Unlock()
-
-	// Close all wish subscription channels
-	for id, ch := range db.wishSubs {
-		close(ch)
-		delete(db.wishSubs, id)
-	}
-
-	// Close all toxicity subscription channels
-	for id, ch := range db.toxicSubs {
-		close(ch)
-		delete(db.toxicSubs, id)
-	}
-
-	// Close all state subscription channels
-	for id, ch := range db.stateSubs {
-		close(ch)
-		delete(db.stateSubs, id)
-	}
+	db.wishSubs.Close()
+    db.toxicSubs.Close()
+    db.stateSubs.Close()
 }
 
 // SubscribeToWishes returns a channel for wish notifications and an unsubscribe function
 func (db *DB) SubscribeToWishes(bufSize int) (<-chan *Wish, func()) {
-	db.subMutex.Lock()
-	defer db.subMutex.Unlock()
-
-	id := db.nextSubID
-	db.nextSubID++
-
-	ch := make(chan *Wish, bufSize)
-	db.wishSubs[id] = ch
-
-	unsubscribe := func() {
-		db.subMutex.Lock()
-		defer db.subMutex.Unlock()
-
-		if ch, ok := db.wishSubs[id]; ok {
-			delete(db.wishSubs, id)
-			close(ch)
-		}
-	}
-
-	return ch, unsubscribe
+	return db.wishSubs.Subscribe(bufSize)
 }
 
 // SubscribeToToxicity returns a channel for wish toxicity update notifications and an unsubscribe function
 func (db *DB) SubscribeToToxicity(bufSize int) (<-chan *Wish, func()) {
-	db.subMutex.Lock()
-	defer db.subMutex.Unlock()
-
-	id := db.nextSubID
-	db.nextSubID++
-
-	ch := make(chan *Wish, bufSize)
-	db.toxicSubs[id] = ch
-
-	unsubscribe := func() {
-		db.subMutex.Lock()
-		defer db.subMutex.Unlock()
-
-		if ch, ok := db.toxicSubs[id]; ok {
-			delete(db.toxicSubs, id)
-			close(ch)
-		}
-	}
-
-	return ch, unsubscribe
+	return db.toxicSubs.Subscribe(bufSize)
 }
 
 // SubscribeToStateUpdates returns a channel for wish state update notifications and an unsubscribe function
 func (db *DB) SubscribeToStateUpdates(bufSize int) (<-chan *Wish, func()) {
-	db.subMutex.Lock()
-	defer db.subMutex.Unlock()
-
-	id := db.nextSubID
-	db.nextSubID++
-
-	ch := make(chan *Wish, bufSize)
-	db.stateSubs[id] = ch
-
-	unsubscribe := func() {
-		db.subMutex.Lock()
-		defer db.subMutex.Unlock()
-
-		if ch, ok := db.stateSubs[id]; ok {
-			delete(db.stateSubs, id)
-			close(ch)
-		}
-	}
-
-	return ch, unsubscribe
+	return db.stateSubs.Subscribe(bufSize)
 }
 
 func (db *DB) GetStats() (*Stats, error) {
@@ -463,18 +386,7 @@ func (db *DB) SaveWish(wish *Wish) error {
 		return err
 	}
 
-	// Notify subscribers
-	db.subMutex.RLock()
-	defer db.subMutex.RUnlock()
-
-	for id, ch := range db.wishSubs {
-		select {
-		case ch <- wish:
-			db.log.Debugf("Notified subscriber %d about wish %d", id, wish.ID)
-		default:
-			db.log.Warnf("Subscriber %d's channel is full, skipping notification for wish %d", id, wish.ID)
-		}
-	}
+    db.wishSubs.Notify(wish)
 
 	return nil
 }
@@ -529,19 +441,7 @@ func (db *DB) UpdateWishState(wishID uint, state WishState) error {
 
 	// Update the wish object with new state
 	wish.State = state
-
-	// Notify subscribers
-	db.subMutex.RLock()
-	defer db.subMutex.RUnlock()
-
-	for id, ch := range db.stateSubs {
-		select {
-		case ch <- &wish:
-			db.log.Debugf("Notified state subscriber %d about wish %d", id, wish.ID)
-		default:
-			db.log.Warnf("State subscriber %d's channel is full, skipping notification for wish %d", id, wish.ID)
-		}
-	}
+	db.stateSubs.Notify(&wish)
 
 	return nil
 }
@@ -579,19 +479,7 @@ func (db *DB) UpdateWishToxicity(wishID uint, toxicity int) error {
 
 	// Update the wish object with new toxicity value
 	wish.Toxicity = sql.NullInt16{Int16: int16(toxicity), Valid: true}
-
-	// Notify subscribers
-	db.subMutex.RLock()
-	defer db.subMutex.RUnlock()
-
-	for id, ch := range db.toxicSubs {
-		select {
-		case ch <- &wish:
-			db.log.Debugf("Notified toxicity subscriber %d about wish %d", id, wish.ID)
-		default:
-			db.log.Warnf("Toxicity subscriber %d's channel is full, skipping notification for wish %d", id, wish.ID)
-		}
-	}
+	db.toxicSubs.Notify(&wish)
 
 	return nil
 }
