@@ -112,6 +112,109 @@ func TestGetAllUsers(t *testing.T) {
 	}
 }
 
+func TestBanUser(t *testing.T) {
+	db := setupTestDB(t)
+
+	// Create test user
+	user := &wakey.User{
+		ID:   100,
+		Name: "Test Ban User",
+	}
+	err := db.CreateUser(user)
+	require.NoError(t, err)
+
+	// Create test plan for receiving wishes
+	plan := &wakey.Plan{
+		UserID:  101, // Different user's plan
+		Content: "Test Plan",
+		WakeAt:  time.Now().Add(24 * time.Hour),
+	}
+	err = db.SavePlan(plan)
+	require.NoError(t, err)
+
+	// Create various wishes with different states
+	wishes := []*wakey.Wish{
+		{
+			FromID:  user.ID,
+			PlanID:  plan.ID,
+			Content: "New Wish 1",
+			State:   wakey.WishStateNew,
+		},
+		{
+			FromID:  user.ID,
+			PlanID:  plan.ID,
+			Content: "New Wish 2",
+			State:   wakey.WishStateNew,
+		},
+		{
+			FromID:  user.ID,
+			PlanID:  plan.ID,
+			Content: "Liked Wish",
+			State:   wakey.WishStateLiked,
+		},
+		{
+			FromID:  102, // Different user's wish
+			PlanID:  plan.ID,
+			Content: "Other User Wish",
+			State:   wakey.WishStateNew,
+		},
+	}
+
+	for _, wish := range wishes {
+		err := db.SaveWish(wish)
+		require.NoError(t, err)
+	}
+
+	// Subscribe to state updates
+	stateCh, unsub := db.SubscribeToStateUpdates(10)
+	defer unsub()
+
+	// Create channel to collect notifications
+	var notifications []*wakey.Wish
+	done := make(chan bool)
+	go func() {
+		for wish := range stateCh {
+			notifications = append(notifications, wish)
+			if len(notifications) == 2 { // Expecting 2 state updates
+				done <- true
+			}
+		}
+	}()
+
+	// Ban the user
+	err = db.BanUser(user.ID)
+	require.NoError(t, err)
+
+	// Wait for notifications
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Timeout waiting for state update notifications")
+	}
+
+	// Verify user is banned
+	bannedUser, err := db.GetUserByID(user.ID)
+	require.NoError(t, err)
+	require.True(t, bannedUser.IsBanned)
+
+	// Verify wishes state updates
+	for _, notification := range notifications {
+		require.Equal(t, wakey.WishStateBanned, notification.State)
+		require.Equal(t, user.ID, notification.FromID)
+	}
+
+	// Verify all new wishes from the user are now banned
+	wishesAfterBan, err := db.GetNewWishesByUserID(plan.UserID)
+	require.NoError(t, err)
+	require.Len(t, wishesAfterBan, 1) // Only the other user's wish should remain new
+	require.Equal(t, int64(102), wishesAfterBan[0].FromID)
+
+	// Test banning non-existent user
+	err = db.BanUser(999)
+	require.Error(t, err)
+	require.Equal(t, wakey.ErrNotFound, err)
+}
+
 func TestPlanOperations(t *testing.T) {
 	db := setupTestDB(t)
 

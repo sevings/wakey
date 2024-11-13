@@ -50,18 +50,18 @@ func (ah *AdminHandler) HandleAction(c tele.Context, action string) error {
 		return nil
 	}
 
-	user, err := ah.handleAdminAction(c)
-	if user == nil {
+	userID, err := ah.handleAdminAction(c)
+	if err != nil {
 		return err
 	}
 
 	switch action {
 	case btnWarnUserID:
-		return ah.HandleWarn(c, user)
+		return ah.HandleWarn(c, userID)
 	case btnBanUserID:
-		return ah.handleBan(c, user)
+		return ah.handleBan(c, userID)
 	case btnSkipBanID:
-		return ah.handleSkip(c, user)
+		return ah.handleSkip(c, userID)
 	default:
 		ah.log.Errorw("unexpected action for AdminHandler", "action", action)
 		return c.Send("Неизвестное действие. Пожалуйста, попробуйте еще раз.")
@@ -91,10 +91,10 @@ func (ah *AdminHandler) HandleState(c tele.Context, state UserState) error {
 	}
 }
 
-func (h *AdminHandler) handleAdminAction(c tele.Context) (*User, error) {
+func (h *AdminHandler) handleAdminAction(c tele.Context) (int64, error) {
 	data := strings.Split(c.Data(), "|")
 	if len(data) != 2 {
-		return nil, fmt.Errorf("invalid data format")
+		return 0, fmt.Errorf("invalid data format")
 	}
 
 	// Parse and validate user ID
@@ -102,52 +102,44 @@ func (h *AdminHandler) handleAdminAction(c tele.Context) (*User, error) {
 	userID, err := strconv.ParseInt(userIDStr, 10, 64)
 	if err != nil {
 		h.log.Errorw("failed to parse user id", "error", err, "userID", userIDStr)
-		return nil, c.Send("Ошибка при обработке ID пользователя.")
+		return 0, c.Send("Ошибка при обработке ID пользователя.")
 	}
 
-	// Get user info
-	user, err := h.db.GetUserByID(userID)
-	if err != nil {
-		h.log.Errorw("failed to get user", "error", err, "userID", userID)
-		return nil, c.Send("Ошибка при получении информации о пользователе.")
-	}
-
-	return user, nil
+	return userID, nil
 }
 
-func (h *AdminHandler) HandleWarn(c tele.Context, user *User) error {
+func (h *AdminHandler) HandleWarn(c tele.Context, userID int64) error {
 	warningMessage := "⚠️ Предупреждение. Ваше сообщение было помечено как неуместное. " +
 		"Пожалуйста, будьте вежливы и уважительны к другим пользователям. " +
 		"Повторные нарушения могут привести к бану."
 
-	_, err := h.api.Send(tele.ChatID(user.ID), warningMessage)
+	_, err := h.api.Send(tele.ChatID(userID), warningMessage)
 	if err != nil {
-		h.log.Errorw("failed to send warning to user", "error", err, "userID", user.ID)
+		h.log.Errorw("failed to send warning to user", "error", err, "userID", userID)
 		return c.Send("Ошибка при отправке предупреждения пользователю.")
 	}
 
-	return c.Send(fmt.Sprintf("Предупреждение отправлено пользователю %d.", user.ID))
+	return c.Send(fmt.Sprintf("Предупреждение отправлено пользователю %d.", userID))
 }
 
-func (h *AdminHandler) handleBan(c tele.Context, user *User) error {
-	user.IsBanned = true
-	if err := h.db.SaveUser(user); err != nil {
-		h.log.Errorw("failed to ban user", "error", err, "userID", user.ID)
+func (h *AdminHandler) handleBan(c tele.Context, userID int64) error {
+	if err := h.db.BanUser(userID); err != nil {
+		h.log.Errorw("failed to ban user", "error", err, "userID", userID)
 		return c.Send("Ошибка при бане пользователя.")
 	}
 
 	// Notify the banned user
 	banMessage := "Вы были забанены за нарушение правил использования бота."
-	_, err := h.api.Send(tele.ChatID(user.ID), banMessage)
+	_, err := h.api.Send(tele.ChatID(userID), banMessage)
 	if err != nil {
-		h.log.Errorw("failed to send ban notification to user", "error", err, "userID", user.ID)
+		h.log.Errorw("failed to send ban notification to user", "error", err, "userID", userID)
 	}
 
-	return c.Send(fmt.Sprintf("Пользователь %d забанен и уведомлен.", user.ID))
+	return c.Send(fmt.Sprintf("Пользователь %d забанен и уведомлен.", userID))
 }
 
-func (h *AdminHandler) handleSkip(c tele.Context, user *User) error {
-	return c.Send(fmt.Sprintf("Бан пользователя %d пропущен.", user.ID))
+func (h *AdminHandler) handleSkip(c tele.Context, userID int64) error {
+	return c.Send(fmt.Sprintf("Бан пользователя %d пропущен.", userID))
 }
 
 func (ah *AdminHandler) HandleNotifyAll(c tele.Context) error {

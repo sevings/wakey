@@ -17,8 +17,8 @@ type DB struct {
 	db        *gorm.DB
 	log       *zap.SugaredLogger
 	wishSubs  *SubscriptionManager
-    toxicSubs *SubscriptionManager
-    stateSubs *SubscriptionManager
+	toxicSubs *SubscriptionManager
+	stateSubs *SubscriptionManager
 }
 
 type User struct {
@@ -49,6 +49,7 @@ const (
 	WishStateLiked    WishState = "L"
 	WishStateDisliked WishState = "D"
 	WishStateReported WishState = "R"
+	WishStateBanned   WishState = "B"
 )
 
 type Wish struct {
@@ -101,16 +102,16 @@ func LoadDatabase(path string) (*DB, bool) {
 		log: log,
 
 		wishSubs:  NewSubscriptionManager("wish", log),
-        toxicSubs: NewSubscriptionManager("toxicity", log),
-        stateSubs: NewSubscriptionManager("state", log),
+		toxicSubs: NewSubscriptionManager("toxicity", log),
+		stateSubs: NewSubscriptionManager("state", log),
 	}, true
 }
 
 // Stop closes all subscription channels and performs cleanup
 func (db *DB) Stop() {
 	db.wishSubs.Close()
-    db.toxicSubs.Close()
-    db.stateSubs.Close()
+	db.toxicSubs.Close()
+	db.stateSubs.Close()
 }
 
 // SubscribeToWishes returns a channel for wish notifications and an unsubscribe function
@@ -272,6 +273,51 @@ func (db *DB) GetAllUsers() ([]*User, error) {
 	return users, nil
 }
 
+// BanUser sets a user's IsBanned status to true and updates all their new wishes to banned state
+func (db *DB) BanUser(userID int64) error {
+	// Start a transaction
+	tx := db.db.Begin()
+	if tx.Error != nil {
+		return tx.Error
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			tx.Rollback()
+		}
+	}()
+
+	// Update user's banned status
+	result := tx.Model(&User{}).Where("id = ?", userID).Update("is_banned", true)
+	if result.Error != nil {
+		tx.Rollback()
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		tx.Rollback()
+		return ErrNotFound
+	}
+
+	// Find all new wishes from this user and update their state to banned
+	var wishes []Wish
+	result = tx.Where("from_id = ? AND state = ?", userID, WishStateNew).Find(&wishes)
+	if result.Error != nil {
+		tx.Rollback()
+		return result.Error
+	}
+
+	for _, wish := range wishes {
+		wish.State = WishStateBanned
+		if err := tx.Save(&wish).Error; err != nil {
+			tx.Rollback()
+			return err
+		}
+		// Notify subscribers about state change
+		db.stateSubs.Notify(&wish)
+	}
+
+	return tx.Commit().Error
+}
+
 func (db *DB) SavePlan(plan *Plan) error {
 	plan.OfferedAt = time.Time{}
 	return db.db.Save(plan).Error
@@ -386,7 +432,7 @@ func (db *DB) SaveWish(wish *Wish) error {
 		return err
 	}
 
-    db.wishSubs.Notify(wish)
+	db.wishSubs.Notify(wish)
 
 	return nil
 }
