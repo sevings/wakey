@@ -90,6 +90,15 @@ func (gh *GeneralHandler) suggestActions(c tele.Context) error {
 	userID := c.Sender().ID
 	gh.stateMan.ClearState(userID)
 
+	_, err := gh.db.GetUserByID(userID)
+	if err != nil {
+		if err == ErrNotFound {
+			return c.Send("Похоже, вы еще не зарегистрированы. Пожалуйста, используйте команду /start чтобы начать процесс регистрации.")
+		}
+		gh.log.Errorw("failed to get user", "error", err, "userID", userID)
+		return c.Send("Произошла ошибка при проверке вашего профиля. Пожалуйста, попробуйте позже.")
+	}
+
 	inlineKeyboard := &tele.ReplyMarkup{}
 
 	btnShowProfile := inlineKeyboard.Data(btnShowProfileText, btnShowProfileID)
