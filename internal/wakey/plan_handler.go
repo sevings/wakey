@@ -437,7 +437,7 @@ func (ph *PlanHandler) HandleNotificationTimeUpdate(c tele.Context) error {
 		return c.Send("Извините, произошла ошибка. Пожалуйста, попробуйте позже.")
 	}
 
-	if strings.ToLower(notificationTimeStr) == "выключить" {
+	if strings.ToLower(notificationTimeStr) == "отключить" {
 		user.NotifyAt = time.Time{} // Set to zero time to indicate notifications are disabled
 	} else {
 		notifyAtUTC, err := parseTime(notificationTimeStr, user.Tz)
